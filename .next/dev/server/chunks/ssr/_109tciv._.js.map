@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///Users/waleed/autoparts-hub/app/layout.tsx"],"sourcesContent":["export default function RootLayout({\n  children,\n}: {\n  children: React.ReactNode;\n}) {\n  return (\n    <html lang=\"ar\" dir=\"rtl\" suppressHydrationWarning>\n      <body\n        className={`${geistSans.variable} ${geistMono.variable} antialiased`}\n        suppressHydrationWarning\n      >\n        {children}\n      </body>\n    </html>\n  );\n}"],"names":["RootLayout","children","lang","dir","suppressHydrationWarning","className","geistSans","variable","geistMono"],"mappings":";;;;;;AAAe,SAASA,WAAW,EACjCC,QAAQ,EAGT;IACC,qBACE,8OAAC;QAAKC,MAAK;QAAKC,KAAI;QAAMC,wBAAwB;kBAChD,cAAA,8OAAC;YACCC,WAAW,GAAGC,UAAUC,QAAQ,CAAC,CAAC,EAAEC,UAAUD,QAAQ,CAAC,YAAY,CAAC;YACpEH,wBAAwB;sBAEvBH;;;;;;;;;;;AAIT"}},
+    {"offset": {"line": 38, "column": 0}, "map": {"version":3,"sources":["file:///Users/waleed/autoparts-hub/node_modules/next/src/server/route-modules/app-page/vendored/rsc/react-jsx-dev-runtime.ts"],"sourcesContent":["module.exports = (\n  require('../../module.compiled') as typeof import('../../module.compiled')\n).vendored['react-rsc']!.ReactJsxDevRuntime\n"],"names":["module","exports","require","vendored","ReactJsxDevRuntime"],"mappings":"AAAAA,OAAOC,OAAO,GACZC,QAAQ,4HACRC,QAAQ,CAAC,YAAY,CAAEC,kBAAkB","ignoreList":[0]}}]
+}

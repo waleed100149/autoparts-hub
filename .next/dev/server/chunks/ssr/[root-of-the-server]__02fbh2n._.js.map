@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["file:///Users/waleed/autoparts-hub/app/favicon.ico.mjs%20(structured%20image%20object)"],"sourcesContent":["import src from \"IMAGE\";\nexport default { src, width: 256, height: 256 }\n"],"names":["src","width","height"],"mappings":";;;;AAAA;;uCACe;IAAEA,KAAAA,mIAAG;IAAEC,OAAO;IAAKC,QAAQ;AAAI"}},
+    {"offset": {"line": 27, "column": 0}, "map": {"version":3,"sources":["file:///Users/waleed/autoparts-hub/app/page.tsx"],"sourcesContent":["fetch(\"/api/custom-requests\", {\n  method: \"POST\",\n  headers: { \"Content-Type\": \"application/json\" },\n  body: JSON.stringify({ user_id, part_name, make, model, year, vin, notes }),\n});"],"names":["fetch","method","headers","body","JSON","stringify","user_id","part_name","make","model","year","vin","notes"],"mappings":"AAAAA,MAAM,wBAAwB;IAC5BC,QAAQ;IACRC,SAAS;QAAE,gBAAgB;IAAmB;IAC9CC,MAAMC,KAAKC,SAAS,CAAC;QAAEC;QAASC;QAAWC;QAAMC;QAAOC;QAAMC;QAAKC;IAAM;AAC3E"}}]
+}
