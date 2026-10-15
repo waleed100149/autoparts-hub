@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 
-// دالة فحص وتعديل حجم وحزمة ترميز حقل status تلقائياً
+// دالة فحص وتعديل هيكلية الجدول وإضافة عمود payment_method تلقائياً
 async function ensureOrdersSchema() {
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -11,10 +11,18 @@ async function ensureOrdersSchema() {
       user_email VARCHAR(255) NOT NULL,
       total_price DECIMAL(10, 2) NOT NULL,
       items_summary TEXT NOT NULL,
+      payment_method VARCHAR(255) CHARACTER SET utf8mb4 DEFAULT 'دفع إلكتروني',
       status VARCHAR(255) CHARACTER SET utf8mb4 DEFAULT 'معلق',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // إضافة عمود payment_method تلقائياً إذا كان الجدول قديم
+  try {
+    await pool.execute(`ALTER TABLE orders ADD COLUMN payment_method VARCHAR(255) CHARACTER SET utf8mb4 DEFAULT 'دفع إلكتروني'`);
+  } catch (e) {
+    // العمود موجود سابقاً
+  }
 
   // توسيع حقل status وتغيير الترميز لمنع خطأ Data truncated
   try {
@@ -24,13 +32,25 @@ async function ensureOrdersSchema() {
   }
 }
 
-// 1. جلب الطلبات (GET)
-export async function GET() {
+// 1. جلب الطلبات (GET) - مع دعم الفلترة حسب user_id
+export async function GET(req: Request) {
   try {
     await ensureOrdersSchema();
-    const [rows]: any = await pool.execute(
-      "SELECT * FROM orders ORDER BY created_at DESC"
-    );
+
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get("user_id");
+
+    let query = "SELECT * FROM orders";
+    const params: any[] = [];
+
+    if (userId) {
+      query += " WHERE user_id = ?";
+      params.push(Number(userId));
+    }
+
+    query += " ORDER BY created_at DESC";
+
+    const [rows]: any = await pool.execute(query, params);
     return NextResponse.json(rows);
   } catch (error: any) {
     console.error("Error fetching orders:", error);
@@ -44,7 +64,7 @@ export async function POST(req: Request) {
     await ensureOrdersSchema();
 
     const body = await req.json();
-    const { user_id, user_name, user_email, total_price, items } = body;
+    const { user_id, user_name, user_email, total_price, items, payment_method } = body;
 
     if (!user_id || !total_price || !items || items.length === 0) {
       return NextResponse.json({ error: "بيانات الطلب غير مكتملة" }, { status: 400 });
@@ -58,10 +78,11 @@ export async function POST(req: Request) {
     const cleanUserName = user_name ? String(user_name) : "عميل";
     const cleanUserEmail = user_email ? String(user_email) : "";
     const cleanTotalPrice = Number(total_price);
+    const cleanPaymentMethod = payment_method ? String(payment_method) : "دفع إلكتروني";
 
     await pool.execute(
-      "INSERT INTO orders (user_id, user_name, user_email, total_price, items_summary, status) VALUES (?, ?, ?, ?, ?, ?)",
-      [cleanUserId, cleanUserName, cleanUserEmail, cleanTotalPrice, items_summary, "معلق"]
+      "INSERT INTO orders (user_id, user_name, user_email, total_price, items_summary, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [cleanUserId, cleanUserName, cleanUserEmail, cleanTotalPrice, items_summary, cleanPaymentMethod, "معلق"]
     );
 
     return NextResponse.json({ message: "تم إرسال الطلب بنجاح" });

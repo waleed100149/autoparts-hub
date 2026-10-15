@@ -151,35 +151,19 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$
 async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
-        const search = searchParams.get("search") || "";
-        const make = searchParams.get("make") || "";
-        const model = searchParams.get("model") || "";
-        const year = searchParams.get("year") || "";
-        let query = "SELECT * FROM parts WHERE 1=1";
-        const queryParams = [];
-        if (search) {
-            query += " AND (part_name LIKE ? OR vin LIKE ?)";
-            queryParams.push(`%${search}%`, `%${search}%`);
-        }
-        if (make) {
-            query += " AND make = ?";
-            queryParams.push(make);
-        }
-        if (model) {
-            query += " AND model = ?";
-            queryParams.push(model);
-        }
-        if (year) {
-            query += " AND year = ?";
-            queryParams.push(year);
+        const category = searchParams.get("category"); // 'parts' أو 'salvage'
+        let query = "SELECT * FROM parts";
+        let params = [];
+        if (category) {
+            query += " WHERE category = ?";
+            params.push(category);
         }
         query += " ORDER BY id DESC";
-        const [rows] = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].execute(query, queryParams);
+        const [rows] = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(query, params);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json(rows);
     } catch (error) {
-        console.error("خطأ في جلب قطع الغيار:", error);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-            error: "حدث خطأ أثناء جلب قطع الغيار"
+            error: error.message
         }, {
             status: 500
         });
@@ -196,14 +180,65 @@ __turbopack_context__.s([
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/mysql2/promise.js [app-route] (ecmascript)");
 ;
 const pool = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["default"].createPool({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "autoparts_db",
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "autoparts_db",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 });
+async function initDB() {
+    try {
+        const connection = await pool.getConnection();
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS parts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        part_name VARCHAR(255) NOT NULL,
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        price DECIMAL(10, 2),
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        image_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE parts ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS custom_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        user_name VARCHAR(255),
+        user_email VARCHAR(255),
+        part_name VARCHAR(255),
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        notes TEXT,
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        status VARCHAR(100) DEFAULT 'قيد النظر',
+        admin_reply TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE custom_requests ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        connection.release();
+    } catch (error) {
+        console.error("خطأ تهيئة قاعدة البيانات:", error);
+    }
+}
+initDB();
 }),
 ];
 

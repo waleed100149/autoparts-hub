@@ -10,6 +10,7 @@ interface Part {
   year: number;
   vin: string;
   price: number;
+  category: "parts" | "salvage";
   image_url?: string;
 }
 
@@ -30,6 +31,7 @@ interface Order {
   user_email: string;
   total_price: number;
   items_summary: string;
+  payment_method?: string;
   status: string;
   created_at: string;
 }
@@ -45,6 +47,7 @@ interface CustomRequest {
   year?: number;
   vin?: string;
   notes?: string;
+  category?: "parts" | "salvage";
   status: string;
   admin_reply?: string;
   created_at: string;
@@ -56,12 +59,25 @@ export default function HomePage() {
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
   const [authError, setAuthError] = useState("");
 
+  const [selectedCategory, setSelectedCategory] = useState<"parts" | "salvage" | null>(null);
   const [activeTab, setActiveTab] = useState<"store" | "cart" | "my_orders" | "custom_request" | "inventory" | "staff" | "orders" | "custom_admin">("store");
   const [parts, setParts] = useState<Part[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customRequests, setCustomRequests] = useState<CustomRequest[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // حالات نافذة الدفع المتعددة
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "reservation" | "bank_transfer">("card");
+
+  const [cardForm, setCardForm] = useState({
+    cardNumber: "4000 1234 5678 9010",
+    cardHolder: "",
+    expiry: "12/28",
+    cvc: "123",
+  });
 
   const [partForm, setPartForm] = useState({
     id: 0,
@@ -71,6 +87,7 @@ export default function HomePage() {
     year: "",
     vin: "",
     price: "",
+    category: "parts" as "parts" | "salvage",
     image_url: "",
   });
   const [isEditing, setIsEditing] = useState(false);
@@ -84,6 +101,7 @@ export default function HomePage() {
     model: "",
     year: "",
     vin: "",
+    category: "parts" as "parts" | "salvage",
     notes: "",
   });
 
@@ -98,7 +116,12 @@ export default function HomePage() {
 
   useEffect(() => {
     if (user) {
-      fetchParts();
+      if (selectedCategory) {
+        fetchParts(selectedCategory);
+      } else {
+        fetchAllParts();
+      }
+
       if (user.role === "admin") {
         fetchOrdersAdmin();
         fetchCustomRequestsAdmin();
@@ -106,11 +129,10 @@ export default function HomePage() {
         fetchMyOrders(user.id);
         fetchCustomRequestsClient(user.id);
       }
-      setActiveTab("store");
     }
-  }, [user]);
+  }, [user, selectedCategory]);
 
-  const fetchParts = async () => {
+  const fetchAllParts = async () => {
     try {
       const res = await fetch("/api/parts");
       if (res.ok) {
@@ -119,6 +141,18 @@ export default function HomePage() {
       }
     } catch (err) {
       console.error("خطأ جلب القطع:", err);
+    }
+  };
+
+  const fetchParts = async (category: "parts" | "salvage") => {
+    try {
+      const res = await fetch(`/api/parts?category=${category}`);
+      if (res.ok) {
+        const data = await res.json();
+        setParts(data);
+      }
+    } catch (err) {
+      console.error("خطأ جلب القطع حسب القسم:", err);
     }
   };
 
@@ -206,6 +240,7 @@ export default function HomePage() {
           model: customForm.model,
           year: customForm.year,
           vin: customForm.vin,
+          category: customForm.category,
           notes: customForm.notes,
         }),
       });
@@ -213,7 +248,7 @@ export default function HomePage() {
       const data = await res.json();
       if (res.ok) {
         alert(data.message || "تم إرسال الطلب بنجاح!");
-        setCustomForm({ part_name: "", make: "", model: "", year: "", vin: "", notes: "" });
+        setCustomForm({ part_name: "", make: "", model: "", year: "", vin: "", category: "parts", notes: "" });
         fetchCustomRequestsClient(user.id);
       } else {
         alert(data.error || "حدث خطأ أثناء إرسال الطلب");
@@ -300,6 +335,7 @@ export default function HomePage() {
   const handleLogout = () => {
     setUser(null);
     setCart([]);
+    setSelectedCategory(null);
     localStorage.removeItem("autoparts_user");
   };
 
@@ -334,39 +370,68 @@ export default function HomePage() {
     setCart((prevCart) => prevCart.filter((item) => item.id !== id));
   };
 
-  const calculateTotal = () => {
+  const calculateSubtotal = () => {
     return cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   };
 
-  const handleCheckout = async () => {
+  const calculateFinalTotal = () => {
+    const base = calculateSubtotal();
+    return paymentMethod === "reservation" ? base + 150 : base;
+  };
+
+  const handleOpenCheckoutModal = () => {
     if (cart.length === 0 || !user) return;
+    setCardForm((prev) => ({ ...prev, cardHolder: user.name }));
+    setShowPaymentModal(true);
+  };
 
-    try {
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          user_name: user.name,
-          user_email: user.email,
-          total_price: calculateTotal(),
-          items: cart,
-        }),
-      });
+  // إرسال الطلب وحفظ طريقة الدفع المحددة
+  const handleProcessPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPaymentLoading(true);
 
-      if (res.ok) {
-        alert("تم إرسال طلبك بنجاح وسوف يظهر في لوحة الإدارة وسجل طلباتك!");
-        setCart([]);
-        fetchMyOrders(user.id);
-        setActiveTab("my_orders");
-      } else {
-        const data = await res.json();
-        alert(data.error || "فشل إرسال الطلب");
+    const paymentText =
+      paymentMethod === "bank_transfer"
+        ? "تحويل بنكي"
+        : paymentMethod === "reservation"
+        ? "نظام حجز (+150)"
+        : "دفع إلكتروني";
+
+    setTimeout(async () => {
+      try {
+        const finalPrice = calculateFinalTotal();
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user!.id,
+            user_name: user!.name,
+            user_email: user!.email,
+            total_price: finalPrice,
+            items: cart,
+            payment_method: paymentText,
+          }),
+        });
+
+        setPaymentLoading(false);
+        setShowPaymentModal(false);
+
+        if (res.ok) {
+          alert(`✅ تم طلبك بنجاح وطريقة الدفع المحددة: (${paymentText})`);
+          setCart([]);
+          fetchMyOrders(user!.id);
+          setActiveTab("my_orders");
+        } else {
+          const data = await res.json();
+          alert(data.error || "فشل إرسال الطلب");
+        }
+      } catch (err) {
+        setPaymentLoading(false);
+        setShowPaymentModal(false);
+        console.error(err);
+        alert("حدث خطأ أثناء الاتصال الخادمي");
       }
-    } catch (err) {
-      console.error(err);
-      alert("حدث خطأ أثناء الاتصال الخادمي");
-    }
+    }, 1800);
   };
 
   const handleSavePart = async (e: React.FormEvent) => {
@@ -383,6 +448,7 @@ export default function HomePage() {
         year: partForm.year ? Number(partForm.year) : null,
         vin: partForm.vin || null,
         price: partForm.price ? Number(partForm.price) : null,
+        category: partForm.category,
         image_url: partForm.image_url || null,
       };
 
@@ -396,9 +462,10 @@ export default function HomePage() {
 
       if (res.ok) {
         alert(isEditing ? "تم تعديل القطعة بنجاح" : "تمت إضافة القطعة للمخزن");
-        setPartForm({ id: 0, part_name: "", make: "", model: "", year: "", vin: "", price: "", image_url: "" });
+        setPartForm({ id: 0, part_name: "", make: "", model: "", year: "", vin: "", price: "", category: "parts", image_url: "" });
         setIsEditing(false);
-        fetchParts();
+        if (selectedCategory) fetchParts(selectedCategory);
+        else fetchAllParts();
       } else {
         alert(data.error || "حدث خطأ عند حفظ البيانات");
       }
@@ -413,7 +480,8 @@ export default function HomePage() {
     try {
       const res = await fetch(`/api/parts/${id}`, { method: "DELETE" });
       if (res.ok) {
-        fetchParts();
+        if (selectedCategory) fetchParts(selectedCategory);
+        else fetchAllParts();
       } else {
         const data = await res.json().catch(() => ({ error: "تعذر الحذف" }));
         alert(data.error || "فشل عملية الحذف");
@@ -572,12 +640,15 @@ export default function HomePage() {
 
         <div className="flex gap-2 flex-wrap items-center">
           <button
-            onClick={() => setActiveTab("store")}
+            onClick={() => {
+              setSelectedCategory(null);
+              setActiveTab("store");
+            }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === "store" ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              activeTab === "store" && !selectedCategory ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            تصفح القطع
+            الرئيسية (الأقسام)
           </button>
 
           {user.role === "client" && (
@@ -672,8 +743,87 @@ export default function HomePage() {
       </header>
 
       <main className="max-w-7xl mx-auto">
-        {activeTab === "store" && (
+        {/* 1. اختيار القسم عند الدخول */}
+        {activeTab === "store" && !selectedCategory && (
+          <div className="max-w-4xl mx-auto text-center py-12 space-y-8">
+            <div>
+              <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
+                مرحباً بك في منصة AutoParts Hub
+              </h1>
+              <p className="text-slate-400 mt-2 text-lg">اختر القسم الذي تريد تصفحه للشراء</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
+              <button
+                onClick={() => setSelectedCategory("parts")}
+                className="bg-slate-900 border-2 border-slate-800 hover:border-blue-500 rounded-2xl p-8 space-y-4 text-right transition transform hover:-translate-y-1 shadow-xl group"
+              >
+                <div className="w-16 h-16 bg-blue-500/10 rounded-xl flex items-center justify-center text-3xl text-blue-400 group-hover:bg-blue-500 group-hover:text-white transition">
+                  ⚙️
+                </div>
+                <h2 className="text-2xl font-bold text-white">قسم قطع الغيار (جديد / وكالة)</h2>
+                <p className="text-sm text-slate-400">تصفح القطع الاستهلاكية المعتمدة والأصلية المتاحة في المخزن.</p>
+                <span className="inline-block text-sm font-semibold text-blue-400 group-hover:underline">
+                  تصفح القطع ←
+                </span>
+              </button>
+
+              <button
+                onClick={() => setSelectedCategory("salvage")}
+                className="bg-slate-900 border-2 border-slate-800 hover:border-amber-500 rounded-2xl p-8 space-y-4 text-right transition transform hover:-translate-y-1 shadow-xl group"
+              >
+                <div className="w-16 h-16 bg-amber-500/10 rounded-xl flex items-center justify-center text-3xl text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition">
+                  🚘
+                </div>
+                <h2 className="text-2xl font-bold text-white">قسم قطع التشاليح (مستعمل)</h2>
+                <p className="text-sm text-slate-400">قطع تشاليح أصلية مفكوكة ومفحوصة بأسعار مناسبة.</p>
+                <span className="inline-block text-sm font-semibold text-amber-400 group-hover:underline">
+                  تصفح قسم التشاليح ←
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 2. تصفح المتجر بالقسم المختار */}
+        {activeTab === "store" && selectedCategory && (
           <div className="space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300"
+                >
+                  ↩ تغيير القسم
+                </button>
+                <h2 className="text-xl font-bold text-white">
+                  أنت تتصفح الآن:{" "}
+                  <span className={selectedCategory === "parts" ? "text-blue-400" : "text-amber-400"}>
+                    {selectedCategory === "parts" ? "قسم قطع الغيار" : "قسم التشاليح"}
+                  </span>
+                </h2>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedCategory("parts")}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
+                    selectedCategory === "parts" ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  ⚙️ قطع الغيار
+                </button>
+                <button
+                  onClick={() => setSelectedCategory("salvage")}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
+                    selectedCategory === "salvage" ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  🚘 التشاليح
+                </button>
+              </div>
+            </div>
+
             <input
               type="text"
               placeholder="ابحث باسم القطعة، الماركة، أو الموديل..."
@@ -693,9 +843,16 @@ export default function HomePage() {
                         <span className="text-slate-500 text-xs">لا توجد صورة</span>
                       )}
                     </div>
-                    <h3 className="font-bold text-lg text-blue-400">{part.part_name}</h3>
-                    <p className="text-xs text-slate-400">{part.make} - {part.model} ({part.year})</p>
-                    <p className="text-xs text-slate-500">VIN: {part.vin || "غير محدد"}</p>
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-bold text-lg text-blue-400">{part.part_name}</h3>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${part.category === 'salvage' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                        {part.category === 'salvage' ? 'تشاليح' : 'قطع غيار'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">{part.make} {part.model} ({part.year})</p>
+                    <p className="text-xs text-slate-500">
+                      {part.category === "salvage" ? "الحالة:" : "VIN:"} {part.vin || "غير محدد"}
+                    </p>
                     <p className="text-lg font-bold text-emerald-400">{part.price} ريال</p>
                   </div>
                   {user.role === "client" ? (
@@ -716,6 +873,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 3. واجهة عرض السلة والشراء */}
         {activeTab === "cart" && user.role === "client" && (
           <div className="max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6">
             <h2 className="text-2xl font-bold text-emerald-400 flex items-center gap-2">
@@ -742,7 +900,9 @@ export default function HomePage() {
                         <div>
                           <h4 className="font-bold text-blue-400">{item.part_name}</h4>
                           <p className="text-xs text-slate-400">{item.make} {item.model} ({item.year})</p>
-                          <p className="text-sm font-bold text-emerald-400 mt-1">{item.price} ريال</p>
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${item.category === 'salvage' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                            {item.category === 'salvage' ? 'تشاليح' : 'قطع غيار'}
+                          </span>
                         </div>
                       </div>
 
@@ -781,13 +941,13 @@ export default function HomePage() {
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center mt-6">
                   <div>
                     <p className="text-xs text-slate-400">الإجمالي الكلي:</p>
-                    <p className="text-2xl font-bold text-emerald-400">{calculateTotal()} ريال</p>
+                    <p className="text-2xl font-bold text-emerald-400">{calculateSubtotal()} ريال</p>
                   </div>
                   <button
-                    onClick={handleCheckout}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-bold transition shadow-lg"
+                    onClick={handleOpenCheckoutModal}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-bold transition shadow-lg flex items-center gap-2"
                   >
-                    إرسال الطلب للتعميد
+                    💳 الانتقال للدفع والتعميد
                   </button>
                 </div>
               </div>
@@ -795,6 +955,191 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 💳 نافذة طرق الدفع المتقدمة */}
+        {showPaymentModal && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50" dir="rtl">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 className="text-xl font-bold text-emerald-400 flex items-center gap-2">
+                  💳 اختيار طريقة الدفع والتعميد
+                </h3>
+                <button
+                  onClick={() => setShowPaymentModal(false)}
+                  className="text-slate-400 hover:text-white font-bold text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* أزرار اختيار طريقة الدفع */}
+              <div className="grid grid-cols-3 gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("card")}
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    paymentMethod === "card" ? "bg-emerald-600 text-white shadow" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  💳 دفع إلكتروني
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("reservation")}
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    paymentMethod === "reservation" ? "bg-amber-600 text-white shadow" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  📌 نظام حجز (+150)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("bank_transfer")}
+                  className={`py-2 text-xs font-bold rounded-lg transition ${
+                    paymentMethod === "bank_transfer" ? "bg-purple-600 text-white shadow" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  🏦 تحويل بنكي
+                </button>
+              </div>
+
+              {/* ملخص المبلغ */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
+                <div className="flex justify-between text-xs text-slate-400">
+                  <span>المبلغ الأساسي للقطع:</span>
+                  <span>{calculateSubtotal()} ريال</span>
+                </div>
+
+                {paymentMethod === "reservation" && (
+                  <div className="flex justify-between text-xs text-amber-400 font-semibold">
+                    <span>رسوم خدمة نظام الحجز والتثبيت:</span>
+                    <span>+ 150 ريال</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                  <span className="text-slate-200 font-bold text-sm">المبلغ الإجمالي النهائي:</span>
+                  <span className="text-2xl font-bold text-emerald-400">{calculateFinalTotal()} ريال</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleProcessPayment} className="space-y-4">
+                {/* 1. خيار الدفع بالبطاقة */}
+                {paymentMethod === "card" && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-slate-300 font-semibold mb-1">اسم حامل البطاقة</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                        value={cardForm.cardHolder}
+                        onChange={(e) => setCardForm({ ...cardForm, cardHolder: e.target.value })}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-slate-300 font-semibold mb-1">رقم البطاقة (مدى / فيزا)</label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={19}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white tracking-widest text-left"
+                        value={cardForm.cardNumber}
+                        onChange={(e) => setCardForm({ ...cardForm, cardNumber: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-300 font-semibold mb-1">تاريخ الانتهاء</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="MM/YY"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white text-center"
+                          value={cardForm.expiry}
+                          onChange={(e) => setCardForm({ ...cardForm, expiry: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-300 font-semibold mb-1">CVC</label>
+                        <input
+                          type="password"
+                          required
+                          maxLength={4}
+                          placeholder="•••"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white text-center"
+                          value={cardForm.cvc}
+                          onChange={(e) => setCardForm({ ...cardForm, cvc: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. خيار نظام الحجز (+150 ريال) */}
+                {paymentMethod === "reservation" && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 text-xs text-slate-200">
+                    <p className="font-bold text-amber-400 text-sm">📌 نظام حجز القطعة وتأكيدها:</p>
+                    <p>
+                      يتيح لك هذا النظام حجز القطعة في المستودع لمدة 48 ساعة لمنع بيعها، وتضاف **150 ريال** كرسوم حجز إداري وتأكيد.
+                    </p>
+                    <div className="space-y-2 pt-1">
+                      <label className="block text-xs text-slate-300 font-semibold">رقم التواصل للتأكيد مع المستودع</label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="05xxxxxxxx"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white text-left"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. خيار التحويل البنكي */}
+                {paymentMethod === "bank_transfer" && (
+                  <div className="bg-purple-500/10 border border-purple-500/30 p-4 rounded-xl space-y-3 text-xs text-slate-200">
+                    <p className="font-bold text-purple-400 text-sm">🏦 بيانات الحساب البنكي الرسمي:</p>
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 text-slate-300 text-[11px]">
+                      <p><strong className="text-slate-100">اسم البنك:</strong> مصرف الراجحي</p>
+                      <p><strong className="text-slate-100">اسم الحساب:</strong> شركة AutoParts Hub المحدودة</p>
+                      <p><strong className="text-slate-100">الآيبان (IBAN):</strong> <span className="font-mono text-emerald-400">SA44 8000 0000 6080 1010 9999</span></p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-300 font-semibold mb-1">اسم المحوّل (كما هو في الحساب البنكي)</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="أدخل اسم المحوّل"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={paymentLoading}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 text-white py-3 rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-lg"
+                  >
+                    {paymentLoading ? (
+                      <>
+                        <span className="animate-spin text-lg">⏳</span> جاري الاتصال وتأكيد العملية...
+                      </>
+                    ) : (
+                      `تأكيد وإكمال الطلب (${calculateFinalTotal()} ريال)`
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 4. سجل طلباتي */}
         {activeTab === "my_orders" && user.role === "client" && (
           <div className="max-w-5xl mx-auto bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-6">
             <h2 className="text-2xl font-bold text-purple-400 flex items-center gap-2">
@@ -823,13 +1168,16 @@ export default function HomePage() {
                         >
                           {ord.status}
                         </span>
+                        <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
+                          {ord.payment_method || "دفع إلكتروني"}
+                        </span>
                       </div>
                       <p className="text-sm font-medium text-slate-300">القطع: {ord.items_summary}</p>
                       <p className="text-xs text-slate-500">تاريخ الطلب: {new Date(ord.created_at).toLocaleString("ar-SA")}</p>
                     </div>
 
                     <div className="text-left bg-slate-900 p-3 rounded-lg border border-slate-800/80">
-                      <span className="text-xs text-slate-400 block">إجمالي المبلغ:</span>
+                      <span className="text-xs text-slate-400 block">إجمالي المبلغ المدفوع:</span>
                       <span className="text-xl font-bold text-emerald-400">{ord.total_price} ريال</span>
                     </div>
                   </div>
@@ -839,20 +1187,33 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 5. طلب قطعة غير متوفرة */}
         {activeTab === "custom_request" && user.role === "client" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 h-fit">
               <div>
                 <h2 className="text-xl font-bold text-cyan-400">طلب قطعة غير متوفرة</h2>
-                <p className="text-xs text-slate-400 mt-1">أدخل مواصفات القطعة وسنقوم بالفحص والرد عليك في أقرب وقت.</p>
+                <p className="text-xs text-slate-400 mt-1">أدخل مواصفات القطعة وحدد القسم المطلوبة فيه وسنرد عليك فوراً.</p>
               </div>
 
               <form onSubmit={handleSendCustomRequest} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">توجيه الطلب الخاص إلى قسم:</label>
+                  <select
+                    className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+                    value={customForm.category}
+                    onChange={(e) => setCustomForm({ ...customForm, category: e.target.value as "parts" | "salvage" })}
+                  >
+                    <option value="parts">⚙️ قسم قطع الغيار (جديدة/وكالة)</option>
+                    <option value="salvage">🚘 قسم التشاليح (مستعملة/تشليح)</option>
+                  </select>
+                </div>
+
                 <input
                   type="text"
                   placeholder="اسم القطعة المطلوبة"
                   required
-                  className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                  className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                   value={customForm.part_name}
                   onChange={(e) => setCustomForm({ ...customForm, part_name: e.target.value })}
                 />
@@ -861,7 +1222,7 @@ export default function HomePage() {
                     type="text"
                     placeholder="الشركة (Make)"
                     required
-                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                     value={customForm.make}
                     onChange={(e) => setCustomForm({ ...customForm, make: e.target.value })}
                   />
@@ -869,7 +1230,7 @@ export default function HomePage() {
                     type="text"
                     placeholder="الموديل (Model)"
                     required
-                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                     value={customForm.model}
                     onChange={(e) => setCustomForm({ ...customForm, model: e.target.value })}
                   />
@@ -878,14 +1239,14 @@ export default function HomePage() {
                   <input
                     type="number"
                     placeholder="سنة الصنع"
-                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                     value={customForm.year}
                     onChange={(e) => setCustomForm({ ...customForm, year: e.target.value })}
                   />
                   <input
                     type="text"
-                    placeholder="رقم الهيكل (VIN)"
-                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                    placeholder={customForm.category === "salvage" ? "حالة القطعة المطلوبة" : "رقم الهيكل (VIN)"}
+                    className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                     value={customForm.vin}
                     onChange={(e) => setCustomForm({ ...customForm, vin: e.target.value })}
                   />
@@ -893,7 +1254,7 @@ export default function HomePage() {
                 <textarea
                   placeholder="ملاحظات أو تفاصيل إضافية عن القطعة..."
                   rows={3}
-                  className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                  className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                   value={customForm.notes}
                   onChange={(e) => setCustomForm({ ...customForm, notes: e.target.value })}
                 />
@@ -914,7 +1275,6 @@ export default function HomePage() {
               ) : (
                 <div className="space-y-4">
                   {customRequests.map((req) => {
-                    // تحديد اللون والنص بناء على الحالة الحقيقية والرد
                     const isReplied = req.admin_reply && req.admin_reply.trim() !== "";
                     const displayStatus = isReplied && req.status === "قيد النظر" ? "تم الرد" : req.status;
 
@@ -922,9 +1282,18 @@ export default function HomePage() {
                       <div key={req.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                         <div className="flex justify-between items-start">
                           <div>
-                            <h3 className="font-bold text-lg text-cyan-400">{req.part_name}</h3>
-                            <p className="text-xs text-slate-400">{req.make} - {req.model} ({req.year || "غير محدد"})</p>
-                            {req.vin && <p className="text-xs text-slate-500">VIN: {req.vin}</p>}
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg text-cyan-400">{req.part_name}</h3>
+                              <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${req.category === 'salvage' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+                                {req.category === 'salvage' ? 'قسم التشاليح' : 'قسم قطع الغيار'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400">{req.make} {req.model} ({req.year || "غير محدد"})</p>
+                            {req.vin && (
+                              <p className="text-xs text-slate-500">
+                                {req.category === "salvage" ? "الحالة:" : "VIN:"} {req.vin}
+                              </p>
+                            )}
                           </div>
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -958,9 +1327,10 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 6. إدارة طلبات القطع الخاصة للإدارة */}
         {activeTab === "custom_admin" && user.role === "admin" && (
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-6">
-            <h2 className="text-2xl font-bold text-cyan-400">إدارة طلبات القطع الخاصة</h2>
+            <h2 className="text-2xl font-bold text-cyan-400">إدارة طلبات القطع الخاصة الواردة</h2>
 
             {customRequests.length === 0 ? (
               <div className="p-8 text-center text-slate-500 bg-slate-950/50 rounded-lg border border-slate-800">
@@ -974,6 +1344,9 @@ export default function HomePage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-500">طلب #{req.id}</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${req.category === 'salvage' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+                            مكتوب لـ: {req.category === 'salvage' ? 'قسم التشاليح' : 'قطع الغيار'}
+                          </span>
                           <span
                             className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                               req.status === "متوفرة"
@@ -993,7 +1366,7 @@ export default function HomePage() {
                       </div>
                       <div className="text-xs text-slate-400">
                         <p>السيارة: {req.make} {req.model} ({req.year || "السنة غير محددة"})</p>
-                        <p>رقم الهيكل: {req.vin || "غير مدخل"}</p>
+                        <p>{req.category === "salvage" ? "حالة القطعة المطلوبة:" : "رقم الهيكل:"} {req.vin || "غير مدخل"}</p>
                       </div>
                     </div>
 
@@ -1042,6 +1415,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 7. إدارة المخزن وإضافة قطع */}
         {activeTab === "inventory" && user.role === "admin" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 h-fit">
@@ -1050,6 +1424,18 @@ export default function HomePage() {
               </h2>
 
               <form onSubmit={handleSavePart} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">حدد قسم القطعة:</label>
+                  <select
+                    className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
+                    value={partForm.category}
+                    onChange={(e) => setPartForm({ ...partForm, category: e.target.value as "parts" | "salvage" })}
+                  >
+                    <option value="parts">⚙️ قسم قطع الغيار (جديدة/وكالة)</option>
+                    <option value="salvage">🚘 قسم التشاليح (مستعملة/مفحوصة)</option>
+                  </select>
+                </div>
+
                 <input
                   type="text"
                   placeholder="اسم القطعة"
@@ -1093,13 +1479,19 @@ export default function HomePage() {
                     onChange={(e) => setPartForm({ ...partForm, price: e.target.value })}
                   />
                 </div>
+
                 <input
                   type="text"
-                  placeholder="رقم الهيكل (VIN)"
+                  placeholder={
+                    partForm.category === "salvage"
+                      ? "حالة القطعة (مثل: ممتازة، بها خدش بسيط، شبه جديدة...)"
+                      : "رقم الهيكل (VIN)"
+                  }
                   className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-sm text-white"
                   value={partForm.vin}
                   onChange={(e) => setPartForm({ ...partForm, vin: e.target.value })}
                 />
+
                 <input
                   type="url"
                   placeholder="رابط الصورة (Image URL)"
@@ -1117,7 +1509,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => {
                         setIsEditing(false);
-                        setPartForm({ id: 0, part_name: "", make: "", model: "", year: "", vin: "", price: "", image_url: "" });
+                        setPartForm({ id: 0, part_name: "", make: "", model: "", year: "", vin: "", price: "", category: "parts", image_url: "" });
                       }}
                       className="bg-slate-700 px-4 py-2.5 rounded-lg text-sm"
                     >
@@ -1135,7 +1527,9 @@ export default function HomePage() {
                   <thead className="bg-slate-800 text-slate-400">
                     <tr>
                       <th className="p-3">اسم القطعة</th>
+                      <th className="p-3">القسم</th>
                       <th className="p-3">السيارة</th>
+                      <th className="p-3">الحالة / VIN</th>
                       <th className="p-3">السعر</th>
                       <th className="p-3">إجراءات</th>
                     </tr>
@@ -1144,7 +1538,13 @@ export default function HomePage() {
                     {parts.map((p) => (
                       <tr key={p.id} className="border-b border-slate-800">
                         <td className="p-3 font-semibold text-blue-400">{p.part_name}</td>
+                        <td className="p-3">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${p.category === 'salvage' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                            {p.category === 'salvage' ? 'تشاليح' : 'قطع غيار'}
+                          </span>
+                        </td>
                         <td className="p-3">{p.make} {p.model} ({p.year})</td>
+                        <td className="p-3 text-xs text-slate-300">{p.vin || "-"}</td>
                         <td className="p-3 text-emerald-400 font-bold">{p.price} ريال</td>
                         <td className="p-3 flex gap-2">
                           <button
@@ -1158,6 +1558,7 @@ export default function HomePage() {
                                 year: p.year ? p.year.toString() : "",
                                 vin: p.vin || "",
                                 price: p.price ? p.price.toString() : "",
+                                category: p.category || "parts",
                                 image_url: p.image_url || "",
                               });
                             }}
@@ -1181,6 +1582,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 8. إضافة موظفين */}
         {activeTab === "staff" && user.role === "admin" && (
           <div className="max-w-xl mx-auto bg-slate-900 border border-slate-800 p-8 rounded-xl space-y-6">
             <div>
@@ -1241,10 +1643,11 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* 9. إدارة طلبات الشراء للإدارة (يعرض نوع الدفع ديناميكياً) */}
         {activeTab === "orders" && user.role === "admin" && (
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
             <h2 className="text-xl font-bold text-purple-400">طلبات العملاء الواردة</h2>
-            
+
             {orders.length === 0 ? (
               <div className="p-8 text-center text-slate-500 bg-slate-950/50 rounded-lg border border-slate-800">
                 لا توجد طلبات معلقة حالياً.
@@ -1259,31 +1662,53 @@ export default function HomePage() {
                       <th className="p-3">البريد</th>
                       <th className="p-3">القطع المشتراة</th>
                       <th className="p-3">الإجمالي</th>
+                      <th className="p-3">حالة ونوع الدفع</th>
                       <th className="p-3">حالة الطلب (التحكم)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map((ord) => (
-                      <tr key={ord.id} className="border-b border-slate-800">
-                        <td className="p-3 font-bold text-blue-400">#{ord.id}</td>
-                        <td className="p-3">{ord.user_name}</td>
-                        <td className="p-3 text-slate-400">{ord.user_email}</td>
-                        <td className="p-3 font-medium text-slate-200">{ord.items_summary}</td>
-                        <td className="p-3 font-bold text-emerald-400">{ord.total_price} ريال</td>
-                        <td className="p-3">
-                          <select
-                            value={ord.status}
-                            onChange={(e) => handleUpdateOrderStatus(ord.id, e.target.value)}
-                            className="bg-slate-800 border border-slate-700 text-white rounded px-2 py-1 text-xs focus:outline-none focus:border-purple-500"
-                          >
-                            <option value="معلق">⏳ معلق</option>
-                            <option value="قيد التوصيل">🚚 قيد التوصيل</option>
-                            <option value="مكتمل">✅ مكتمل</option>
-                            <option value="ملغي">❌ ملغي</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
+                    {orders.map((ord) => {
+                      const method = ord.payment_method || "دفع إلكتروني";
+                      let badgeStyle = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                      let icon = "💳";
+
+                      if (method.includes("تحويل")) {
+                        badgeStyle = "bg-purple-500/10 text-purple-400 border-purple-500/20";
+                        icon = "🏦";
+                      } else if (method.includes("حجز")) {
+                        badgeStyle = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                        icon = "📌";
+                      }
+
+                      return (
+                        <tr key={ord.id} className="border-b border-slate-800">
+                          <td className="p-3 font-bold text-blue-400">#{ord.id}</td>
+                          <td className="p-3">{ord.user_name}</td>
+                          <td className="p-3 text-slate-400">{ord.user_email}</td>
+                          <td className="p-3 font-medium text-slate-200">{ord.items_summary}</td>
+                          <td className="p-3 font-bold text-emerald-400">{ord.total_price} ريال</td>
+                          <td className="p-3">
+                            <span
+                              className={`border px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${badgeStyle}`}
+                            >
+                              {icon} {method}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <select
+                              value={ord.status}
+                              onChange={(e) => handleUpdateOrderStatus(ord.id, e.target.value)}
+                              className="bg-slate-800 border border-slate-700 text-white rounded px-2 py-1 text-xs focus:outline-none focus:border-purple-500"
+                            >
+                              <option value="معلق">⏳ معلق</option>
+                              <option value="قيد التوصيل">🚚 قيد التوصيل</option>
+                              <option value="مكتمل">✅ مكتمل</option>
+                              <option value="ملغي">❌ ملغي</option>
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

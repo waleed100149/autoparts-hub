@@ -156,14 +156,13 @@ async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const userId = searchParams.get("user_id");
-        let query = "SELECT * FROM custom_requests ORDER BY created_at DESC";
+        let query = "SELECT * FROM custom_requests";
         let params = [];
         if (userId) {
-            query = "SELECT * FROM custom_requests WHERE user_id = ? ORDER BY created_at DESC";
-            params = [
-                userId
-            ];
+            query += " WHERE user_id = ?";
+            params.push(userId);
         }
+        query += " ORDER BY id DESC";
         const [rows] = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(query, params);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json(rows);
     } catch (error) {
@@ -177,8 +176,8 @@ async function GET(request) {
 async function POST(request) {
     try {
         const body = await request.json();
-        const { user_id, user_name, user_email, part_name, make, model, year, vin, notes } = body;
-        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query("INSERT INTO custom_requests (user_id, user_name, user_email, part_name, make, model, year, vin, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'قيد النظر')", [
+        const { user_id, user_name, user_email, part_name, make, model, year, vin, notes, category } = body;
+        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query("INSERT INTO custom_requests (user_id, user_name, user_email, part_name, make, model, year, vin, notes, category, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'قيد النظر')", [
             user_id,
             user_name,
             user_email,
@@ -187,10 +186,11 @@ async function POST(request) {
             model,
             year || null,
             vin || null,
-            notes || null
+            notes || null,
+            category || "parts"
         ]);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-            message: "تم إرسال طلبك بنجاح وسنقوم بالرد عليك قريباً!"
+            message: "تم إرسال طلبك الخاص بنجاح!"
         });
     } catch (error) {
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
@@ -204,7 +204,6 @@ async function PUT(request) {
     try {
         const body = await request.json();
         const { request_id, status, admin_reply } = body;
-        // تحديد الحالة: إذا اختار الموظف حالة أو كتب رداً يتم تحديد الحالة المناسبة
         let updatedStatus = status;
         if (!updatedStatus || updatedStatus === "قيد النظر") {
             updatedStatus = admin_reply && admin_reply.trim() !== "" ? "تم الرد" : "قيد النظر";
@@ -215,7 +214,7 @@ async function PUT(request) {
             request_id
         ]);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-            message: "تم تحديث الرد والحالة بنجاح"
+            message: "تم تحديث حالة الطلب والرد بنجاح!"
         });
     } catch (error) {
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
@@ -236,14 +235,65 @@ __turbopack_context__.s([
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/mysql2/promise.js [app-route] (ecmascript)");
 ;
 const pool = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["default"].createPool({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "autoparts_db",
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "autoparts_db",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 });
+async function initDB() {
+    try {
+        const connection = await pool.getConnection();
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS parts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        part_name VARCHAR(255) NOT NULL,
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        price DECIMAL(10, 2),
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        image_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE parts ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS custom_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        user_name VARCHAR(255),
+        user_email VARCHAR(255),
+        part_name VARCHAR(255),
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        notes TEXT,
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        status VARCHAR(100) DEFAULT 'قيد النظر',
+        admin_reply TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE custom_requests ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        connection.release();
+    } catch (error) {
+        console.error("خطأ تهيئة قاعدة البيانات:", error);
+    }
+}
+initDB();
 }),
 ];
 

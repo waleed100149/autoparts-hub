@@ -150,74 +150,52 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$serv
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/db.ts [app-route] (ecmascript)");
 ;
 ;
-// دالة تضمن أن العمود image_url يتسع للروابط الطويلة جداً
-async function ensurePartsSchema() {
+async function POST(request) {
     try {
-        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].execute(`ALTER TABLE parts MODIFY COLUMN image_url TEXT`);
-    } catch (e) {
-    // تم التعديل سابقاً
+        const body = await request.json();
+        const { part_name, make, model, year, vin, price, image_url, category } = body;
+        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query("INSERT INTO parts (part_name, make, model, year, vin, price, image_url, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+            part_name,
+            make,
+            model,
+            year || null,
+            vin || null,
+            price,
+            image_url || null,
+            category || "parts"
+        ]);
+        return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
+            message: "تمت إضافة القطعة بنجاح"
+        });
+    } catch (error) {
+        return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
+            error: error.message
+        }, {
+            status: 500
+        });
     }
 }
-async function POST(req) {
-    return handleSave(req);
-}
-async function PUT(req) {
-    return handleSave(req);
-}
-async function handleSave(req) {
+async function PUT(request) {
     try {
-        await ensurePartsSchema();
-        const body = await req.json();
-        const id = body.id ? Number(body.id) : null;
-        const part_name = body.part_name ? String(body.part_name).trim() : null;
-        const make = body.make ? String(body.make).trim() : null;
-        const model = body.model ? String(body.model).trim() : null;
-        const year = body.year !== "" && body.year !== undefined && body.year !== null ? Number(body.year) : null;
-        const vin = body.vin && String(body.vin).trim() !== "" ? String(body.vin).trim() : null;
-        const price = body.price !== "" && body.price !== undefined && body.price !== null ? Number(body.price) : null;
-        const image_url = body.image_url && String(body.image_url).trim() !== "" ? String(body.image_url).trim() : null;
-        if (!part_name || !make || !model || price === null) {
-            return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-                error: "اسم القطعة، الماركة، الموديل والسعر حقول مطلوبة"
-            }, {
-                status: 400
-            });
-        }
-        if (id && id > 0) {
-            await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].execute(`UPDATE parts 
-         SET part_name = ?, make = ?, model = ?, year = ?, vin = ?, price = ?, image_url = ? 
-         WHERE id = ?`, [
-                part_name,
-                make,
-                model,
-                year,
-                vin,
-                price,
-                image_url,
-                id
-            ]);
-            return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-                message: "تم تحديث القطعة بنجاح"
-            });
-        } else {
-            await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].execute(`INSERT INTO parts (part_name, make, model, year, vin, price, image_url) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-                part_name,
-                make,
-                model,
-                year,
-                vin,
-                price,
-                image_url
-            ]);
-            return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-                message: "تمت إضافة القطعة بنجاح"
-            });
-        }
-    } catch (error) {
-        console.error("Error saving part:", error);
+        const body = await request.json();
+        const { id, part_name, make, model, year, vin, price, image_url, category } = body;
+        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query("UPDATE parts SET part_name = ?, make = ?, model = ?, year = ?, vin = ?, price = ?, image_url = ?, category = ? WHERE id = ?", [
+            part_name,
+            make,
+            model,
+            year || null,
+            vin || null,
+            price,
+            image_url || null,
+            category || "parts",
+            id
+        ]);
         return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
-            error: error.message || "حدث خطأ أثناء حفظ البيانات"
+            message: "تم تعديل القطعة بنجاح"
+        });
+    } catch (error) {
+        return __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["NextResponse"].json({
+            error: error.message
         }, {
             status: 500
         });
@@ -234,14 +212,65 @@ __turbopack_context__.s([
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/mysql2/promise.js [app-route] (ecmascript)");
 ;
 const pool = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$mysql2$2f$promise$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__["default"].createPool({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "autoparts_db",
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "autoparts_db",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 });
+async function initDB() {
+    try {
+        const connection = await pool.getConnection();
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS parts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        part_name VARCHAR(255) NOT NULL,
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        price DECIMAL(10, 2),
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        image_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE parts ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        await connection.query(`
+      CREATE TABLE IF NOT EXISTS custom_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        user_name VARCHAR(255),
+        user_email VARCHAR(255),
+        part_name VARCHAR(255),
+        make VARCHAR(100),
+        model VARCHAR(100),
+        year INT,
+        vin VARCHAR(100),
+        notes TEXT,
+        category ENUM('parts', 'salvage') DEFAULT 'parts',
+        status VARCHAR(100) DEFAULT 'قيد النظر',
+        admin_reply TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+        try {
+            await connection.query(`
+        ALTER TABLE custom_requests ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts';
+      `);
+        } catch (err) {}
+        connection.release();
+    } catch (error) {
+        console.error("خطأ تهيئة قاعدة البيانات:", error);
+    }
+}
+initDB();
 }),
 ];
 
