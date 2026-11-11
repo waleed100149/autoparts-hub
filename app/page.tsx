@@ -373,9 +373,9 @@ const gridBg: React.CSSProperties = {
   backgroundSize: "44px 44px",
 };
 
-const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Cairo:wght@800;900&display=swap');
-.aph-root{font-family:'IBM Plex Sans Arabic',system-ui,sans-serif}
-.aph-root .font-black,.aph-root .font-extrabold{font-family:'Cairo','IBM Plex Sans Arabic',sans-serif}
+// الخطوط تُحمَّل عن طريق next/font في layout.tsx
+const FONT_CSS = `.aph-root{font-family:var(--font-plex),system-ui,sans-serif}
+.aph-root .font-black,.aph-root .font-extrabold{font-family:var(--font-cairo),var(--font-plex),sans-serif}
 .aph-scroll::-webkit-scrollbar{height:0;width:0}
 @keyframes aphIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .aph-in{animation:aphIn .35s ease both}
@@ -391,6 +391,7 @@ export default function HomePage() {
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   const [selectedCategory, setSelectedCategory] = useState<"parts" | "salvage" | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("store");
@@ -415,11 +416,12 @@ export default function HomePage() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"card" | "reservation" | "bank_transfer">("card");
 
+  // نموذج بطاقة للعرض فقط (محاكاة) — بيانات البطاقة لا تُرسل للسيرفر أبداً
   const [cardForm, setCardForm] = useState({
-    cardNumber: "4000 1234 5678 9010",
+    cardNumber: "",
     cardHolder: "",
-    expiry: "12/28",
-    cvc: "123",
+    expiry: "",
+    cvc: "",
   });
 
   const [partForm, setPartForm] = useState({
@@ -456,11 +458,13 @@ export default function HomePage() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3800);
   };
 
+  // المستخدم الحالي يُقرأ من جلسة السيرفر (cookie) — مو من localStorage اللي يقدر أي أحد يعدّله
   useEffect(() => {
-    const savedUser = localStorage.getItem("autoparts_user");
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    fetch("/api/auth")
+      .then((res) => (res.ok ? res.json() : { user: null }))
+      .then((data) => setUser(data.user ?? null))
+      .catch(() => setUser(null))
+      .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
@@ -475,8 +479,8 @@ export default function HomePage() {
         fetchOrdersAdmin();
         fetchCustomRequestsAdmin();
       } else {
-        fetchMyOrders(user.id);
-        fetchCustomRequestsClient(user.id);
+        fetchMyOrders();
+        fetchCustomRequestsClient();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -553,9 +557,10 @@ export default function HomePage() {
     }
   };
 
-  const fetchMyOrders = async (userId: number) => {
+  // السيرفر يرجّع طلبات المستخدم المسجّل فقط
+  const fetchMyOrders = async () => {
     try {
-      const res = await fetch(`/api/orders?user_id=${userId}`);
+      const res = await fetch("/api/orders");
       if (res.ok) {
         const data = await res.json();
         setOrders(data);
@@ -577,9 +582,9 @@ export default function HomePage() {
     }
   };
 
-  const fetchCustomRequestsClient = async (userId: number) => {
+  const fetchCustomRequestsClient = async () => {
     try {
-      const res = await fetch(`/api/custom-requests?user_id=${userId}`);
+      const res = await fetch("/api/custom-requests");
       if (res.ok) {
         const data = await res.json();
         setCustomRequests(data);
@@ -652,9 +657,6 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: user.id,
-          user_name: user.name,
-          user_email: user.email,
           part_name: customForm.part_name,
           make: customForm.make,
           model: customForm.model,
@@ -669,7 +671,7 @@ export default function HomePage() {
       if (res.ok) {
         notify(data.message || "تم إرسال الطلب بنجاح!");
         setCustomForm({ part_name: "", make: "", model: "", year: "", vin: "", category: "parts", notes: "" });
-        fetchCustomRequestsClient(user.id);
+        fetchCustomRequestsClient();
       } else {
         notify(data.error || "حدث خطأ أثناء إرسال الطلب", "error");
       }
@@ -728,7 +730,6 @@ export default function HomePage() {
 
       setUser(data.user);
       setActiveTab("store");
-      localStorage.setItem("autoparts_user", JSON.stringify(data.user));
     } catch (err: any) {
       setAuthError(err.message);
     } finally {
@@ -757,12 +758,18 @@ export default function HomePage() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    }).catch(() => {});
     setUser(null);
     setCart([]);
+    setOrders([]);
+    setCustomRequests([]);
     setSelectedCategory(null);
     setActiveTab("store");
-    localStorage.removeItem("autoparts_user");
   };
 
   const addToCart = (part: Part) => {
@@ -818,20 +825,16 @@ export default function HomePage() {
     const paymentText =
       paymentMethod === "bank_transfer" ? "تحويل بنكي" : paymentMethod === "reservation" ? "نظام حجز (+150)" : "دفع إلكتروني";
 
+    // تأخير بسيط لمحاكاة بوابة الدفع
     setTimeout(async () => {
       try {
-        const finalPrice = calculateFinalTotal();
+        // نرسل رقم القطعة والكمية فقط — السيرفر يحسب السعر من قاعدة البيانات
         const res = await fetch("/api/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: user!.id,
-            user_name: user!.name,
-            user_email: user!.email,
-            total_price: finalPrice,
-            items: cart,
-            image_url: cart.find((c) => c.image_url)?.image_url || null,
-            payment_method: paymentText,
+            items: cart.map((c) => ({ id: c.id, quantity: c.quantity })),
+            payment_method: paymentMethod,
           }),
         });
 
@@ -841,7 +844,7 @@ export default function HomePage() {
         if (res.ok) {
           notify(`تم تأكيد طلبك بنجاح — طريقة الدفع: ${paymentText}`);
           setCart([]);
-          fetchMyOrders(user!.id);
+          fetchMyOrders();
           setActiveTab("my_orders");
         } else {
           const data = await res.json();
@@ -862,11 +865,10 @@ export default function HomePage() {
   const handleSavePart = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const endpoint = "/api/add-part";
+      const endpoint = isEditing ? `/api/parts/${partForm.id}` : "/api/parts";
       const method = isEditing ? "PUT" : "POST";
 
       const cleanedData = {
-        id: isEditing ? Number(partForm.id) : null,
         part_name: partForm.part_name || null,
         make: partForm.make || null,
         model: partForm.model || null,
@@ -942,6 +944,15 @@ export default function HomePage() {
   /* =========================================================
      Auth screen
      ========================================================= */
+  // ننتظر التحقق من الجلسة عشان ما تظهر شاشة الدخول لحظة للمستخدم المسجّل
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#0A0C0F] flex items-center justify-center text-orange-500">
+        <Icon name="spinner" className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
   if (!user) {
     const isAdmin = authMode === "admin_login";
     return (
@@ -1175,8 +1186,8 @@ export default function HomePage() {
       ? [
           { key: "store", label: "المتجر", icon: "grid", onClick: () => setSelectedCategory(null) },
           { key: "cart", label: "السلة", icon: "cart", badge: totalCartCount },
-          { key: "my_orders", label: "طلباتي", icon: "box", onClick: () => fetchMyOrders(user.id) },
-          { key: "custom_request", label: "طلب قطعة خاصة", icon: "search", onClick: () => fetchCustomRequestsClient(user.id) },
+          { key: "my_orders", label: "طلباتي", icon: "box", onClick: () => fetchMyOrders() },
+          { key: "custom_request", label: "طلب قطعة خاصة", icon: "search", onClick: () => fetchCustomRequestsClient() },
         ]
       : [
           { key: "store", label: "المتجر", icon: "grid", onClick: () => setSelectedCategory(null) },
@@ -1855,7 +1866,7 @@ export default function HomePage() {
               title="طلباتي"
               subtitle="تابع حالة طلباتك المشتراة"
               actions={
-                <button onClick={() => fetchMyOrders(user.id)} className={btnGhost}>
+                <button onClick={() => fetchMyOrders()} className={btnGhost}>
                   <Icon name="refresh" className="w-4 h-4" />
                   تحديث
                 </button>

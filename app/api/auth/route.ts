@@ -1,93 +1,109 @@
 import { NextResponse } from "next/server";
-import { pool } from "../../../lib/db";
+import bcrypt from "bcryptjs";
+import { pool, ensureDB } from "@/lib/db";
+import { HttpError, createSession, destroySession, getSessionUser, handleError, requireAdmin } from "@/lib/auth";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateAccount(name: unknown, email: unknown, password: unknown) {
+  const cleanName = String(name ?? "").trim();
+  const cleanEmail = String(email ?? "").trim().toLowerCase();
+  const cleanPassword = String(password ?? "");
+  if (!cleanName || !cleanEmail || !cleanPassword) throw new HttpError(400, "جميع الحقول مطلوبة");
+  if (!EMAIL_RE.test(cleanEmail)) throw new HttpError(400, "البريد الإلكتروني غير صالح");
+  if (cleanPassword.length < 6) throw new HttpError(400, "كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+  return { name: cleanName, email: cleanEmail, password: cleanPassword };
+}
+
+async function createUser(name: string, email: string, password: string, role: "client" | "admin") {
+  const [existing]: any = await pool.execute("SELECT id FROM users WHERE email = ?", [email]);
+  if (existing.length > 0) throw new HttpError(400, "البريد الإلكتروني مستخدم بالفعل");
+
+  const hash = await bcrypt.hash(password, 10);
+  const [result]: any = await pool.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)", [
+    name,
+    email,
+    hash,
+    role,
+  ]);
+  return { id: result.insertId as number, name, email, role };
+}
+
+/** المستخدم الحالي (بدل الاعتماد على localStorage) */
+export async function GET() {
+  try {
+    const user = await getSessionUser();
+    return NextResponse.json({ user });
+  } catch (error) {
+    return handleError(error);
+  }
+}
 
 export async function POST(req: Request) {
   try {
+    await ensureDB();
     const body = await req.json();
-    const { action, name, email, password, role } = body;
+    const { action } = body;
 
     // 1. إنشاء حساب عميل جديد
     if (action === "register") {
-      if (!name || !email || !password) {
-        return NextResponse.json({ error: "جميع الحقول مطلوبة" }, { status: 400 });
-      }
-
-      const [existing]: any = await pool.execute("SELECT id FROM users WHERE email = ?", [email]);
-      if (existing.length > 0) {
-        return NextResponse.json({ error: "البريد الإلكتروني مستخدم بالفعل" }, { status: 400 });
-      }
-
-      const [result]: any = await pool.execute(
-        "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'client')",
-        [name, email, password]
-      );
-
-      return NextResponse.json({
-        user: { id: result.insertId, name, email, role: "client" },
-      });
+      const { name, email, password } = validateAccount(body.name, body.email, body.password);
+      const user = await createUser(name, email, password, "client");
+      await createSession(user.id);
+      return NextResponse.json({ user });
     }
 
-    // 2. إنشاء موظف/إداري جديد من لوحة التحكم
+    // 2. إضافة موظف/إداري — للأدمن فقط
     if (action === "add_employee") {
-      if (!name || !email || !password) {
-        return NextResponse.json({ error: "جميع البيانات مطلوبة" }, { status: 400 });
-      }
-
-      const [existing]: any = await pool.execute("SELECT id FROM users WHERE email = ?", [email]);
-      if (existing.length > 0) {
-        return NextResponse.json({ error: "هذا البريد مضاف بالفعل" }, { status: 400 });
-      }
-
-      await pool.execute(
-        "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'admin')",
-        [name, email, password]
-      );
-
+      await requireAdmin();
+      const { name, email, password } = validateAccount(body.name, body.email, body.password);
+      await createUser(name, email, password, "admin");
       return NextResponse.json({ message: "تمت إضافة الموظف/الإداري بنجاح" });
     }
 
-    // 3. تسجيل الدخول مع الفحص الصارم للصلاحية (Role Check)
+    // 3. تسجيل الدخول
     if (action === "login") {
-      if (!email || !password) {
-        return NextResponse.json({ error: "البريد وكلمة المرور مطلوبان" }, { status: 400 });
-      }
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const password = String(body.password ?? "");
+      if (!email || !password) throw new HttpError(400, "البريد وكلمة المرور مطلوبان");
 
-      // أ) حساب الأدمن الرئيسي Master Admin
-      if (email === "waleed100149@gmail.com" && password === "waleed100149") {
-        if (role === "client") {
-          return NextResponse.json({ error: "حساب الإدارة يجب الدخول به من بوابة الإدارة" }, { status: 403 });
-        }
-        return NextResponse.json({
-          user: { id: 9999, name: "وليد (الإدارة)", email, role: "admin" },
-        });
-      }
-
-      // ب) فحص بقية المستخدمين والموظفين في قاعدة البيانات
-      const [rows]: any = await pool.execute(
-        "SELECT id, name, email, role FROM users WHERE email = ? AND password = ?",
-        [email, password]
-      );
-
-      if (rows.length === 0) {
-        return NextResponse.json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" }, { status: 401 });
-      }
-
+      const [rows]: any = await pool.execute("SELECT id, name, email, role, password FROM users WHERE email = ?", [email]);
       const dbUser = rows[0];
 
+      let valid = false;
+      if (dbUser) {
+        if (String(dbUser.password).startsWith("$2")) {
+          valid = await bcrypt.compare(password, dbUser.password);
+        } else if (dbUser.password === password) {
+          // حساب قديم كلمة مروره محفوظة كنص — نشفّرها الآن
+          valid = true;
+          await pool.execute("UPDATE users SET password = ? WHERE id = ?", [await bcrypt.hash(password, 10), dbUser.id]);
+        }
+      }
+      if (!valid) throw new HttpError(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
+
       // التأكد من أن نوع الحساب يطابق البوابة التي يدخل منها
-      if (role === "admin" && dbUser.role !== "admin") {
-        return NextResponse.json({ error: "غير مصرح لك بالدخول من بوابة الإدارة" }, { status: 403 });
+      if (body.role === "admin" && dbUser.role !== "admin") {
+        throw new HttpError(403, "غير مصرح لك بالدخول من بوابة الإدارة");
+      }
+      if (body.role === "client" && dbUser.role === "admin") {
+        throw new HttpError(403, "حساب الإدارة يجب الدخول به من بوابة الإدارة");
       }
 
-      if (role === "client" && dbUser.role === "admin") {
-        return NextResponse.json({ error: "حساب الإدارة يجب الدخول به من بوابة الإدارة" }, { status: 403 });
-      }
-
-      return NextResponse.json({ user: dbUser });
+      await createSession(dbUser.id);
+      // لا نرجّع كلمة المرور للمتصفح
+      const user = { id: dbUser.id, name: dbUser.name, email: dbUser.email, role: dbUser.role };
+      return NextResponse.json({ user });
     }
 
-    return NextResponse.json({ error: "إجراء غير صالح" }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // 4. تسجيل الخروج
+    if (action === "logout") {
+      await destroySession();
+      return NextResponse.json({ message: "تم تسجيل الخروج" });
+    }
+
+    throw new HttpError(400, "إجراء غير صالح");
+  } catch (error) {
+    return handleError(error);
   }
 }
