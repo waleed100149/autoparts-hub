@@ -11,13 +11,20 @@ export const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   charset: "utf8mb4",
-  // في الإنتاج نتحقق من شهادة قاعدة البيانات. لو مزوّد قاعدة البيانات يستخدم شهادة ذاتية التوقيع
-  // اضبط DB_SSL_REJECT_UNAUTHORIZED=false (غير مستحسن).
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
-      : undefined,
+  ssl: sslOptions(),
 });
+
+// في الإنتاج نتحقق من شهادة قاعدة البيانات.
+// لو مزوّد القاعدة يستخدم شهادة CA خاصة (مثل Aiven) حط محتوى ملف ca.pem في DB_SSL_CA.
+// DB_SSL_REJECT_UNAUTHORIZED=false يعطّل التحقق — حل مؤقت فقط وغير مستحسن.
+function sslOptions() {
+  if (process.env.NODE_ENV !== "production") return undefined;
+  const ca = process.env.DB_SSL_CA?.replace(/\\n/g, "\n");
+  return {
+    ca: ca || undefined,
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+  };
+}
 
 const TABLE_OPTS = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
