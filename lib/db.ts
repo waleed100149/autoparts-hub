@@ -85,6 +85,7 @@ async function initDB() {
   await tryQuery("ALTER TABLE orders CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 
   // عناصر الطلب: كل قطعة في صف مستقل بسعرها وقت الشراء
+  await migrateLegacyOrderItems();
   await pool.query(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -120,6 +121,22 @@ async function initDB() {
   await tryQuery("ALTER TABLE custom_requests ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts'");
 
   await seedAdmin();
+}
+
+// لو فيه جدول order_items قديم بأعمدة مختلفة، نعيد تسميته كنسخة احتياطية (بدون حذف بيانات)
+// عشان ينشأ الجدول الجديد بالأعمدة الصحيحة
+const ORDER_ITEMS_COLUMNS = ["order_id", "part_id", "part_name", "image_url", "quantity", "unit_price"];
+async function migrateLegacyOrderItems() {
+  const [cols]: any = await pool.query(
+    "SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_items'"
+  );
+  if (cols.length === 0) return;
+  const existing = new Set(cols.map((c: any) => String(c.name).toLowerCase()));
+  if (ORDER_ITEMS_COLUMNS.every((c) => existing.has(c))) return;
+
+  const backup = `order_items_legacy_${Date.now()}`;
+  await pool.query(`RENAME TABLE order_items TO \`${backup}\``);
+  console.log(`جدول order_items القديم انحفظ باسم ${backup}`);
 }
 
 // إنشاء حساب الأدمن الرئيسي من متغيرات البيئة (بدل كتابته داخل الكود)
