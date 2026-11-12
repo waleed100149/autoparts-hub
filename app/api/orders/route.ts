@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { HttpError, handleError, requireAdmin, requireUser } from "@/lib/auth";
-import { parseId } from "@/lib/validate";
+import { parseId, splitCommission } from "@/lib/validate";
 
 const ORDER_STATUSES = ["معلق", "قيد التوصيل", "مكتمل", "ملغي"];
 const RESERVATION_FEE = 150;
@@ -15,7 +15,10 @@ const PAYMENT_METHODS: Record<string, string> = {
 async function attachItems(orders: any[]) {
   if (orders.length === 0) return orders;
   const [items]: any = await pool.query(
-    "SELECT order_id, part_id AS id, part_name, image_url, quantity, unit_price AS price FROM order_items WHERE order_id IN (?)",
+    `SELECT oi.order_id, oi.part_id AS id, oi.part_name, oi.image_url, oi.quantity, oi.unit_price AS price,
+            oi.merchant_id, oi.commission_amount, m.store_name
+     FROM order_items oi LEFT JOIN merchants m ON m.user_id = oi.merchant_id
+     WHERE oi.order_id IN (?)`,
     [orders.map((o) => o.id)]
   );
   return orders.map((o) => ({ ...o, items: items.filter((i: any) => i.order_id === o.id) }));
@@ -25,6 +28,7 @@ async function attachItems(orders: any[]) {
 export async function GET() {
   try {
     const user = await requireUser();
+    if (user.role === "merchant") throw new HttpError(403, "مبيعات التاجر تُعرض من لوحة التاجر");
 
     const [rows]: any =
       user.role === "admin"
@@ -42,6 +46,7 @@ export async function POST(req: Request) {
   const conn = await pool.getConnection();
   try {
     const user = await requireUser();
+    if (user.role !== "client") throw new HttpError(403, "الطلب متاح لحسابات العملاء فقط");
     const body = await req.json();
 
     const paymentKey = String(body.payment_method ?? "card");
@@ -59,18 +64,33 @@ export async function POST(req: Request) {
       quantities.set(id, (quantities.get(id) ?? 0) + qty);
     }
 
-    const [parts]: any = await conn.query("SELECT id, part_name, price, image_url FROM parts WHERE id IN (?)", [
-      [...quantities.keys()],
-    ]);
+    // قطع التجار غير المعتمدين ما تنباع
+    const [parts]: any = await conn.query(
+      `SELECT p.id, p.part_name, p.price, p.image_url, p.merchant_id, m.commission_rate
+       FROM parts p LEFT JOIN merchants m ON m.user_id = p.merchant_id
+       WHERE p.id IN (?) AND (p.merchant_id IS NULL OR m.status = 'approved')`,
+      [[...quantities.keys()]]
+    );
     if (parts.length !== quantities.size) throw new HttpError(400, "بعض القطع في السلة لم تعد متوفرة");
 
-    const lines = parts.map((p: any) => ({
-      part_id: p.id,
-      part_name: p.part_name,
-      image_url: p.image_url,
-      quantity: quantities.get(p.id)!,
-      unit_price: Number(p.price),
-    }));
+    // العمولة تنخصم من سعر التاجر: العميل يدفع السعر نفسه، والتاجر ياخذ (السعر − العمولة)
+    const lines = parts.map((p: any) => {
+      const quantity = quantities.get(p.id)!;
+      const unit_price = Number(p.price);
+      const rate = p.merchant_id ? Number(p.commission_rate) : 0;
+      const split = splitCommission(unit_price, quantity, rate);
+      return {
+        part_id: p.id,
+        part_name: p.part_name,
+        image_url: p.image_url,
+        quantity,
+        unit_price,
+        merchant_id: p.merchant_id ?? null,
+        commission_rate: rate,
+        commission_amount: p.merchant_id ? split.commission : 0,
+        merchant_net: p.merchant_id ? split.net : 0,
+      };
+    });
 
     const subtotal = lines.reduce((s: number, l: any) => s + l.unit_price * l.quantity, 0);
     const total = Math.round((subtotal + (paymentKey === "reservation" ? RESERVATION_FEE : 0)) * 100) / 100;
@@ -83,9 +103,25 @@ export async function POST(req: Request) {
       [user.id, user.name, user.email, total, summary, paymentText]
     );
     const orderId = result.insertId;
-    await conn.query("INSERT INTO order_items (order_id, part_id, part_name, image_url, quantity, unit_price) VALUES ?", [
-      lines.map((l: any) => [orderId, l.part_id, l.part_name, l.image_url, l.quantity, l.unit_price]),
-    ]);
+    await conn.query(
+      `INSERT INTO order_items
+        (order_id, part_id, part_name, image_url, quantity, unit_price, merchant_id, commission_rate, commission_amount, merchant_net)
+       VALUES ?`,
+      [
+        lines.map((l: any) => [
+          orderId,
+          l.part_id,
+          l.part_name,
+          l.image_url,
+          l.quantity,
+          l.unit_price,
+          l.merchant_id,
+          l.commission_rate,
+          l.commission_amount,
+          l.merchant_net,
+        ]),
+      ]
+    );
     await conn.commit();
 
     return NextResponse.json({ message: "تم إرسال الطلب بنجاح", orderId, total }, { status: 201 });

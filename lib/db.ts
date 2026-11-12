@@ -44,12 +44,39 @@ async function initDB() {
       name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL UNIQUE,
       password VARCHAR(255) NOT NULL,
-      role ENUM('client', 'admin') NOT NULL DEFAULT 'client',
+      role ENUM('client', 'admin', 'merchant') NOT NULL DEFAULT 'client',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ${TABLE_OPTS}
   `);
   // bcrypt يحتاج 60 حرف على الأقل
   await tryQuery("ALTER TABLE users MODIFY COLUMN password VARCHAR(255) NOT NULL");
+  await tryQuery("ALTER TABLE users MODIFY COLUMN role ENUM('client', 'admin', 'merchant') NOT NULL DEFAULT 'client'");
+
+  // بيانات التاجر: المحل والسجل التجاري والعقد ونسبة العمولة
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS merchants (
+      user_id INT PRIMARY KEY,
+      store_name VARCHAR(255) NOT NULL,
+      logo_url TEXT,
+      phone VARCHAR(30) NOT NULL,
+      city VARCHAR(100) NOT NULL,
+      address TEXT,
+      tax_number VARCHAR(20) NOT NULL,
+      commercial_register VARCHAR(20) NOT NULL,
+      cr_document_url TEXT NOT NULL,
+      iban VARCHAR(34),
+      commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 10.00,
+      status ENUM('pending', 'approved', 'rejected', 'suspended') NOT NULL DEFAULT 'pending',
+      admin_note TEXT,
+      contract_version VARCHAR(20) NOT NULL,
+      contract_accepted_at TIMESTAMP NOT NULL,
+      reviewed_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_tax_number (tax_number),
+      UNIQUE KEY uq_commercial_register (commercial_register),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ${TABLE_OPTS}
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS parts (
@@ -66,6 +93,9 @@ async function initDB() {
     ) ${TABLE_OPTS}
   `);
   await tryQuery("ALTER TABLE parts ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts'");
+  // القطعة اللي merchant_id حقها NULL ملك للمتجر نفسه (الإدارة)
+  await tryQuery("ALTER TABLE parts ADD COLUMN merchant_id INT NULL");
+  await tryQuery("ALTER TABLE parts ADD INDEX idx_parts_merchant (merchant_id)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -95,10 +125,22 @@ async function initDB() {
       image_url TEXT,
       quantity INT NOT NULL,
       unit_price DECIMAL(10, 2) NOT NULL,
+      merchant_id INT NULL,
+      commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 0,
+      commission_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+      merchant_net DECIMAL(10, 2) NOT NULL DEFAULT 0,
+      INDEX idx_order_items_merchant (merchant_id),
       FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
       FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL
     ) ${TABLE_OPTS}
   `);
+
+  // أعمدة العمولة لجدول order_items لو كان منشأ قبل نظام التجار
+  await tryQuery("ALTER TABLE order_items ADD COLUMN merchant_id INT NULL");
+  await tryQuery("ALTER TABLE order_items ADD COLUMN commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 0");
+  await tryQuery("ALTER TABLE order_items ADD COLUMN commission_amount DECIMAL(10, 2) NOT NULL DEFAULT 0");
+  await tryQuery("ALTER TABLE order_items ADD COLUMN merchant_net DECIMAL(10, 2) NOT NULL DEFAULT 0");
+  await tryQuery("ALTER TABLE order_items ADD INDEX idx_order_items_merchant (merchant_id)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS custom_requests (
@@ -125,6 +167,12 @@ async function initDB() {
 
 // لو فيه جدول order_items قديم بأعمدة مختلفة، نعيد تسميته كنسخة احتياطية (بدون حذف بيانات)
 // عشان ينشأ الجدول الجديد بالأعمدة الصحيحة
+/** نسبة العمولة الافتراضية للتاجر الجديد (٪) — الأدمن يقدر يغيّرها لكل تاجر */
+export const DEFAULT_COMMISSION_RATE = (() => {
+  const n = Number(process.env.DEFAULT_COMMISSION_RATE);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 10;
+})();
+
 const ORDER_ITEMS_COLUMNS = ["order_id", "part_id", "part_name", "image_url", "quantity", "unit_price"];
 async function migrateLegacyOrderItems() {
   const [cols]: any = await pool.query(

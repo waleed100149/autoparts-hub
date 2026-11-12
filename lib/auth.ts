@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { pool, ensureDB } from "./db";
 
-export type Role = "client" | "admin";
+export type Role = "client" | "admin" | "merchant";
 export interface SessionUser {
   id: number;
   name: string;
@@ -86,6 +86,46 @@ export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.role !== "admin") throw new HttpError(403, "غير مصرح لك بهذا الإجراء");
   return user;
+}
+
+export type MerchantStatus = "pending" | "approved" | "rejected" | "suspended";
+export interface MerchantProfile {
+  user_id: number;
+  store_name: string;
+  logo_url: string | null;
+  phone: string;
+  city: string;
+  address: string | null;
+  tax_number: string;
+  commercial_register: string;
+  cr_document_url: string;
+  iban: string | null;
+  commission_rate: number;
+  status: MerchantStatus;
+  admin_note: string | null;
+  contract_version: string;
+  contract_accepted_at: string;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export async function getMerchantProfile(userId: number): Promise<MerchantProfile | null> {
+  await ensureDB();
+  const [rows]: any = await pool.query("SELECT * FROM merchants WHERE user_id = ?", [userId]);
+  if (!rows[0]) return null;
+  return { ...rows[0], commission_rate: Number(rows[0].commission_rate) };
+}
+
+/** تاجر مسجّل دخول — ولو approvedOnly يلزم يكون حسابه معتمد من الإدارة */
+export async function requireMerchant(approvedOnly = true) {
+  const user = await requireUser();
+  if (user.role !== "merchant") throw new HttpError(403, "هذا الإجراء للتجار فقط");
+  const merchant = await getMerchantProfile(user.id);
+  if (!merchant) throw new HttpError(403, "بيانات المحل غير موجودة");
+  if (approvedOnly && merchant.status !== "approved") {
+    throw new HttpError(403, "حسابك كتاجر لم يُعتمد بعد من الإدارة");
+  }
+  return { user, merchant };
 }
 
 /** يحوّل أي خطأ لرد JSON — بدون كشف تفاصيل قاعدة البيانات للمستخدم */

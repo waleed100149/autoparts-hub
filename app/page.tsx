@@ -1,6 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import {
+  Icon,
+  inputCls,
+  textareaCls,
+  labelCls,
+  panelCls,
+  btnPrimary,
+  btnGhost,
+  fmt,
+  formatDate,
+  StatusBadge,
+  CategoryBadge,
+  PaymentBadge,
+  EmptyState,
+  SectionHeader,
+  Logo,
+  gridBg,
+  FONT_CSS,
+} from "./components/ui";
+import { MerchantSignup } from "./components/MerchantSignup";
+import { MerchantProfile, MerchantSales, MerchantStatusScreen, StoreAvatar } from "./components/MerchantPanels";
+import { AdminMerchants } from "./components/AdminMerchants";
+import { previewCommission, type AdminMerchant, type Merchant } from "./components/merchant-types";
 
 /* =========================================================
    Types
@@ -15,6 +38,9 @@ interface Part {
   price: number;
   category: "parts" | "salvage";
   image_url?: string;
+  merchant_id?: number | null;
+  store_name?: string | null;
+  store_logo?: string | null;
 }
 
 interface CartItem extends Part {
@@ -25,7 +51,7 @@ interface User {
   id: number;
   name: string;
   email: string;
-  role: "client" | "admin";
+  role: "client" | "admin" | "merchant";
 }
 
 interface OrderItem {
@@ -34,6 +60,7 @@ interface OrderItem {
   image_url?: string | null;
   quantity?: number;
   price?: number;
+  store_name?: string | null;
 }
 
 interface Order {
@@ -67,7 +94,19 @@ interface CustomRequest {
   created_at: string;
 }
 
-type Tab = "store" | "cart" | "my_orders" | "custom_request" | "inventory" | "staff" | "orders" | "custom_admin";
+type Tab =
+  | "store"
+  | "cart"
+  | "my_orders"
+  | "custom_request"
+  | "inventory"
+  | "staff"
+  | "orders"
+  | "custom_admin"
+  | "merchants"
+  | "merchant_sales"
+  | "merchant_profile";
+type AuthMode = "client_login" | "client_register" | "admin_login" | "merchant_login" | "merchant_register";
 type ToastType = "success" | "error" | "info";
 interface Toast {
   id: number;
@@ -76,318 +115,14 @@ interface Toast {
 }
 
 /* =========================================================
-   Icons (inline SVG — no external dependency)
-   ========================================================= */
-const ICONS: Record<string, React.ReactNode> = {
-  logo: (
-    <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" />
-    </>
-  ),
-  wrench: <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
-  car: (
-    <>
-      <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
-      <circle cx="7" cy="17" r="2" />
-      <path d="M9 17h6" />
-      <circle cx="17" cy="17" r="2" />
-    </>
-  ),
-  grid: (
-    <>
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-    </>
-  ),
-  cart: (
-    <>
-      <circle cx="8" cy="21" r="1" />
-      <circle cx="19" cy="21" r="1" />
-      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
-    </>
-  ),
-  box: (
-    <>
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-      <path d="m3.3 7 8.7 5 8.7-5M12 22V12" />
-    </>
-  ),
-  search: (
-    <>
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.3-4.3" />
-    </>
-  ),
-  plus: <path d="M5 12h14M12 5v14" />,
-  minus: <path d="M5 12h14" />,
-  trash: <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" />,
-  edit: <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />,
-  users: (
-    <>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </>
-  ),
-  clipboard: (
-    <>
-      <rect x="8" y="2" width="8" height="4" rx="1" />
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 12h6M9 16h4" />
-    </>
-  ),
-  logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
-  x: <path d="M18 6 6 18M6 6l12 12" />,
-  image: (
-    <>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="9" cy="9" r="2" />
-      <path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21" />
-    </>
-  ),
-  card: (
-    <>
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <path d="M2 10h20M6 15h4" />
-    </>
-  ),
-  bank: <path d="M3 22h18M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 2l9 5H3z" />,
-  lock: (
-    <>
-      <rect x="3" y="11" width="18" height="11" rx="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </>
-  ),
-  check: <path d="M20 6 9 17l-5-5" />,
-  clock: (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 6v6l4 2" />
-    </>
-  ),
-  truck: (
-    <>
-      <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2M15 18H9M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
-      <circle cx="17" cy="18" r="2" />
-      <circle cx="7" cy="18" r="2" />
-    </>
-  ),
-  ban: (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <path d="m4.9 4.9 14.2 14.2" />
-    </>
-  ),
-  mail: (
-    <>
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="m22 7-10 6L2 7" />
-    </>
-  ),
-  user: (
-    <>
-      <circle cx="12" cy="8" r="5" />
-      <path d="M20 21a8 8 0 0 0-16 0" />
-    </>
-  ),
-  arrowLeft: <path d="M19 12H5M12 19l-7-7 7-7" />,
-  chevronLeft: <path d="m15 18-6-6 6-6" />,
-  chevronRight: <path d="m9 18 6-6-6-6" />,
-  message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-  wallet: (
-    <>
-      <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
-      <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
-    </>
-  ),
-  phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />,
-  shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4" />,
-  send: <path d="m22 2-7 20-4-9-9-4ZM22 2 11 13" />,
-  refresh: <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" />,
-  zoom: (
-    <>
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.3-4.3M11 8v6M8 11h6" />
-    </>
-  ),
-  calendar: (
-    <>
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <path d="M16 2v4M8 2v4M3 10h18" />
-    </>
-  ),
-  info: (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 16v-4M12 8h.01" />
-    </>
-  ),
-  spinner: <path d="M21 12a9 9 0 1 1-6.22-8.56" />,
-};
-
-function Icon({ name, className = "w-5 h-5", strokeWidth = 1.8 }: { name: string; className?: string; strokeWidth?: number }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={strokeWidth}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      {ICONS[name]}
-    </svg>
-  );
-}
-
-/* =========================================================
-   Design helpers
-   ========================================================= */
-const inputCls =
-  "w-full h-11 rounded-xl bg-[#0D1014] border border-white/10 px-3.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition focus:border-orange-500/70 focus:ring-4 focus:ring-orange-500/10";
-const textareaCls =
-  "w-full rounded-xl bg-[#0D1014] border border-white/10 px-3.5 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition focus:border-orange-500/70 focus:ring-4 focus:ring-orange-500/10 resize-none";
-const labelCls = "block text-xs font-semibold text-zinc-400 mb-1.5";
-const panelCls = "rounded-2xl bg-[#12151B] border border-white/[0.07]";
-const btnPrimary =
-  "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-white text-sm font-bold transition shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed";
-const btnGhost =
-  "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-zinc-200 text-sm font-semibold transition";
-
-const fmt = (n: number | string | null | undefined) => Number(n || 0).toLocaleString("en-US");
-
-const formatDate = (d: string) => {
-  try {
-    return new Date(d).toLocaleString("ar-SA-u-ca-gregory-nu-latn", { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return d;
-  }
-};
-
-const STATUS_META: Record<string, { cls: string; dot: string; icon: string }> = {
-  "معلق": { cls: "bg-amber-500/10 text-amber-300 ring-amber-500/25", dot: "bg-amber-400", icon: "clock" },
-  "قيد النظر": { cls: "bg-amber-500/10 text-amber-300 ring-amber-500/25", dot: "bg-amber-400", icon: "clock" },
-  "قيد التوصيل": { cls: "bg-sky-500/10 text-sky-300 ring-sky-500/25", dot: "bg-sky-400", icon: "truck" },
-  "تم الرد": { cls: "bg-sky-500/10 text-sky-300 ring-sky-500/25", dot: "bg-sky-400", icon: "message" },
-  "مكتمل": { cls: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/25", dot: "bg-emerald-400", icon: "check" },
-  "متوفرة": { cls: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/25", dot: "bg-emerald-400", icon: "check" },
-  "ملغي": { cls: "bg-red-500/10 text-red-300 ring-red-500/25", dot: "bg-red-400", icon: "ban" },
-  "غير متوفرة": { cls: "bg-red-500/10 text-red-300 ring-red-500/25", dot: "bg-red-400", icon: "ban" },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const m = STATUS_META[status] || STATUS_META["معلق"];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ring-inset ${m.cls}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />
-      {status}
-    </span>
-  );
-}
-
-function CategoryBadge({ category, long = false }: { category?: "parts" | "salvage"; long?: boolean }) {
-  const salvage = category === "salvage";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset backdrop-blur ${
-        salvage ? "bg-lime-500/10 text-lime-300 ring-lime-500/25" : "bg-sky-500/10 text-sky-300 ring-sky-500/25"
-      }`}
-    >
-      <Icon name={salvage ? "car" : "wrench"} className="w-3 h-3" strokeWidth={2.2} />
-      {salvage ? (long ? "قسم التشاليح" : "تشاليح") : long ? "قسم قطع الغيار" : "قطع غيار"}
-    </span>
-  );
-}
-
-function paymentMeta(method?: string) {
-  const m = method || "دفع إلكتروني";
-  if (m.includes("تحويل")) return { label: m, icon: "bank", cls: "bg-violet-500/10 text-violet-300 ring-violet-500/25" };
-  if (m.includes("حجز")) return { label: m, icon: "lock", cls: "bg-amber-500/10 text-amber-300 ring-amber-500/25" };
-  return { label: m, icon: "card", cls: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/25" };
-}
-
-function PaymentBadge({ method }: { method?: string }) {
-  const p = paymentMeta(method);
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ring-inset ${p.cls}`}>
-      <Icon name={p.icon} className="w-3.5 h-3.5" strokeWidth={2} />
-      {p.label}
-    </span>
-  );
-}
-
-function EmptyState({ icon, title, hint, action }: { icon: string; title: string; hint?: string; action?: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center justify-center text-center py-16 px-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.015]">
-      <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-zinc-400 mb-4">
-        <Icon name={icon} className="w-6 h-6" />
-      </div>
-      <p className="font-bold text-zinc-200">{title}</p>
-      {hint && <p className="text-sm text-zinc-500 mt-1 max-w-sm">{hint}</p>}
-      {action && <div className="mt-5">{action}</div>}
-    </div>
-  );
-}
-
-function SectionHeader({ icon, title, subtitle, actions }: { icon: string; title: string; subtitle?: string; actions?: React.ReactNode }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
-      <div className="flex items-center gap-3.5">
-        <div className="w-11 h-11 rounded-xl bg-orange-500/10 ring-1 ring-inset ring-orange-500/25 text-orange-400 flex items-center justify-center shrink-0">
-          <Icon name={icon} className="w-5 h-5" />
-        </div>
-        <div>
-          <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight">{title}</h2>
-          {subtitle && <p className="text-sm text-zinc-500 mt-0.5">{subtitle}</p>}
-        </div>
-      </div>
-      {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
-    </div>
-  );
-}
-
-function Logo({ size = "md" }: { size?: "md" | "lg" }) {
-  const box = size === "lg" ? "w-12 h-12 rounded-2xl" : "w-10 h-10 rounded-xl";
-  return (
-    <div className="flex items-center gap-3">
-      <div className={`${box} bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white shadow-lg shadow-orange-500/30`}>
-        <Icon name="logo" className={size === "lg" ? "w-6 h-6" : "w-5 h-5"} strokeWidth={2.2} />
-      </div>
-      <div className="leading-tight">
-        <p className={`${size === "lg" ? "text-xl" : "text-base"} font-black text-white tracking-tight`} dir="ltr">
-          AutoParts<span className="text-orange-500">Hub</span>
-        </p>
-        <p className="text-[11px] text-zinc-500 font-medium">قطع غيار · تشاليح</p>
-      </div>
-    </div>
-  );
-}
-
-const gridBg: React.CSSProperties = {
-  backgroundImage:
-    "linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)",
-  backgroundSize: "44px 44px",
-};
-
-// الخطوط تُحمَّل عن طريق next/font في layout.tsx
-const FONT_CSS = `.aph-root{font-family:var(--font-plex),system-ui,sans-serif}
-.aph-root .font-black,.aph-root .font-extrabold{font-family:var(--font-cairo),var(--font-plex),sans-serif}
-.aph-scroll::-webkit-scrollbar{height:0;width:0}
-@keyframes aphIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.aph-in{animation:aphIn .35s ease both}
-.aph-root input[type=number]::-webkit-inner-spin-button{opacity:.3}
-.aph-root select option{background:#12151B}`;
-
-/* =========================================================
    Page
    ========================================================= */
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<"client_login" | "client_register" | "admin_login">("client_login");
+  const [merchant, setMerchant] = useState<Merchant | null>(null);
+  const [adminMerchants, setAdminMerchants] = useState<AdminMerchant[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("client_login");
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -462,12 +197,20 @@ export default function HomePage() {
   useEffect(() => {
     fetch("/api/auth")
       .then((res) => (res.ok ? res.json() : { user: null }))
-      .then((data) => setUser(data.user ?? null))
+      .then((data) => {
+        setUser(data.user ?? null);
+        setMerchant(data.merchant ?? null);
+        if (data.user?.role === "merchant") setActiveTab("inventory");
+      })
       .catch(() => setUser(null))
       .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
+    if (user?.role === "merchant") {
+      if (merchant?.status === "approved") fetchMyParts();
+      return;
+    }
     if (user) {
       if (selectedCategory) {
         fetchParts(selectedCategory);
@@ -478,16 +221,17 @@ export default function HomePage() {
       if (user.role === "admin") {
         fetchOrdersAdmin();
         fetchCustomRequestsAdmin();
+        fetchMerchantsAdmin();
       } else {
         fetchMyOrders();
         fetchCustomRequestsClient();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, selectedCategory]);
+  }, [user, selectedCategory, merchant?.status]);
 
   useEffect(() => {
-    if (user) fetchCatalog();
+    if (user && user.role !== "merchant") fetchCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -530,6 +274,63 @@ export default function HomePage() {
       }
     } catch (err) {
       console.error("خطأ جلب القطع:", err);
+    }
+  };
+
+  // قطع التاجر نفسه فقط
+  const fetchMyParts = async () => {
+    try {
+      const res = await fetch("/api/parts?mine=1");
+      if (res.ok) setParts(await res.json());
+    } catch (err) {
+      console.error("خطأ جلب قطع التاجر:", err);
+    }
+  };
+
+  const fetchMerchantsAdmin = async () => {
+    try {
+      const res = await fetch("/api/merchants");
+      if (res.ok) setAdminMerchants(await res.json());
+    } catch (err) {
+      console.error("خطأ جلب التجار:", err);
+    }
+  };
+
+  const refreshMerchant = async () => {
+    try {
+      const res = await fetch("/api/merchants/me");
+      if (res.ok) {
+        const data = await res.json();
+        setMerchant(data.merchant);
+        if (data.merchant?.status === "approved") notify("حسابك معتمد! تقدر تضيف قطعك الحين");
+        else notify("حالة الحساب ما تغيّرت", "info");
+      }
+    } catch {
+      notify("حدث خطأ في الاتصال بالخادم", "error");
+    }
+  };
+
+  const reloadParts = () => {
+    if (user?.role === "merchant") fetchMyParts();
+    else if (selectedCategory) fetchParts(selectedCategory);
+    else fetchAllParts();
+  };
+
+  // رفع صورة القطعة بدل لصق الرابط
+  const handleUploadPartImage = async (file: File) => {
+    if (file.size > 1.5 * 1024 * 1024) return notify("حجم الصورة أكبر من 1.5 ميجا", "error");
+    setUploadingImage(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "تعذر رفع الصورة");
+      setPartForm((f) => ({ ...f, image_url: data.url }));
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "تعذر رفع الصورة", "error");
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -717,7 +518,7 @@ export default function HomePage() {
     setAuthLoading(true);
     try {
       const action = authMode === "client_register" ? "register" : "login";
-      const role = authMode === "admin_login" ? "admin" : "client";
+      const role = authMode === "admin_login" ? "admin" : authMode === "merchant_login" ? "merchant" : "client";
 
       const res = await fetch("/api/auth", {
         method: "POST",
@@ -729,7 +530,8 @@ export default function HomePage() {
       if (!res.ok) throw new Error(data.error || "حدث خطأ أثناء الدخول");
 
       setUser(data.user);
-      setActiveTab("store");
+      setMerchant(data.merchant ?? null);
+      setActiveTab(data.user.role === "merchant" ? "inventory" : "store");
     } catch (err: any) {
       setAuthError(err.message);
     } finally {
@@ -765,6 +567,10 @@ export default function HomePage() {
       body: JSON.stringify({ action: "logout" }),
     }).catch(() => {});
     setUser(null);
+    setMerchant(null);
+    setAuthMode((m) => (m === "merchant_register" ? "merchant_login" : m));
+    setAdminMerchants([]);
+    setParts([]);
     setCart([]);
     setOrders([]);
     setCustomRequests([]);
@@ -891,8 +697,7 @@ export default function HomePage() {
         notify(isEditing ? "تم تعديل القطعة بنجاح" : "تمت إضافة القطعة للمخزن");
         resetPartForm();
         setIsEditing(false);
-        if (selectedCategory) fetchParts(selectedCategory);
-        else fetchAllParts();
+        reloadParts();
       } else {
         notify(data.error || "حدث خطأ عند حفظ البيانات", "error");
       }
@@ -908,8 +713,7 @@ export default function HomePage() {
       const res = await fetch(`/api/parts/${id}`, { method: "DELETE" });
       if (res.ok) {
         notify("تم حذف القطعة", "info");
-        if (selectedCategory) fetchParts(selectedCategory);
-        else fetchAllParts();
+        reloadParts();
       } else {
         const data = await res.json().catch(() => ({ error: "تعذر الحذف" }));
         notify(data.error || "فشل عملية الحذف", "error");
@@ -953,8 +757,38 @@ export default function HomePage() {
     );
   }
 
+  if (!user && authMode === "merchant_register") {
+    return (
+      <div className="aph-root min-h-screen bg-[#0A0C0F] text-zinc-100 relative" dir="rtl">
+        <style dangerouslySetInnerHTML={{ __html: FONT_CSS }} />
+        <div className="absolute inset-0" style={gridBg} />
+        <div className="relative flex flex-col items-center p-5 sm:p-10">
+          <div className="mb-8">
+            <Logo size="lg" />
+          </div>
+          <MerchantSignup
+            onCancel={() => setAuthMode("merchant_login")}
+            onDone={(u, m) => {
+              setAuthMode("merchant_login");
+              setUser(u);
+              setMerchant(m);
+              setActiveTab("inventory");
+            }}
+          />
+        </div>
+        {toastLayer}
+      </div>
+    );
+  }
+
   if (!user) {
     const isAdmin = authMode === "admin_login";
+    const isMerchant = authMode === "merchant_login";
+    const portals: { mode: AuthMode; label: string; icon: string; active: boolean }[] = [
+      { mode: "client_login", label: "العملاء", icon: "user", active: !isAdmin && !isMerchant },
+      { mode: "merchant_login", label: "التجار", icon: "store", active: isMerchant },
+      { mode: "admin_login", label: "الإدارة", icon: "shield", active: isAdmin },
+    ];
     return (
       <div className="aph-root min-h-screen bg-[#0A0C0F] text-zinc-100 flex" dir="rtl">
         <style dangerouslySetInnerHTML={{ __html: FONT_CSS }} />
@@ -1008,44 +842,36 @@ export default function HomePage() {
 
             <div className="mb-7">
               <h2 className="text-2xl font-extrabold text-white">
-                {isAdmin ? "بوابة الإدارة" : authMode === "client_login" ? "أهلاً بعودتك" : "إنشاء حساب جديد"}
+                {isAdmin ? "بوابة الإدارة" : isMerchant ? "بوابة التجار" : authMode === "client_login" ? "أهلاً بعودتك" : "إنشاء حساب جديد"}
               </h2>
               <p className="text-sm text-zinc-500 mt-1.5">
                 {isAdmin
                   ? "دخول مخصص للإدارة والموظفين فقط."
+                  : isMerchant
+                  ? "ادخل لإدارة قطع محلك ومتابعة مبيعاتك ومستحقاتك."
                   : authMode === "client_login"
                   ? "سجّل دخولك لتصفح القطع ومتابعة طلباتك."
                   : "أنشئ حسابك خلال ثوانٍ وابدأ الطلب."}
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/[0.07] mb-6">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode("client_login");
-                  setAuthError("");
-                }}
-                className={`h-10 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${
-                  !isAdmin ? "bg-white text-zinc-900 shadow" : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Icon name="user" className="w-4 h-4" />
-                العملاء
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode("admin_login");
-                  setAuthError("");
-                }}
-                className={`h-10 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${
-                  isAdmin ? "bg-white text-zinc-900 shadow" : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Icon name="shield" className="w-4 h-4" />
-                الإدارة
-              </button>
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/[0.07] mb-6">
+              {portals.map((p) => (
+                <button
+                  key={p.mode}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode(p.mode);
+                    setAuthError("");
+                  }}
+                  className={`h-10 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${
+                    p.active ? "bg-white text-zinc-900 shadow" : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Icon name={p.icon} className="w-4 h-4" />
+                  {p.label}
+                </button>
+              ))}
             </div>
 
             {authError && (
@@ -1109,14 +935,36 @@ export default function HomePage() {
                   <Icon name="spinner" className="w-5 h-5 animate-spin" />
                 ) : (
                   <>
-                    {isAdmin ? "دخول لوحة الإدارة" : authMode === "client_login" ? "تسجيل الدخول" : "إنشاء الحساب"}
+                    {isAdmin
+                      ? "دخول لوحة الإدارة"
+                      : isMerchant
+                      ? "دخول لوحة التاجر"
+                      : authMode === "client_login"
+                      ? "تسجيل الدخول"
+                      : "إنشاء الحساب"}
                     <Icon name="arrowLeft" className="w-4 h-4" strokeWidth={2.2} />
                   </>
                 )}
               </button>
             </form>
 
-            {!isAdmin && (
+            {isMerchant && (
+              <div className="mt-6 rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 text-center">
+                <p className="text-sm text-zinc-300">عندك محل قطع غيار أو تشليح؟</p>
+                <button
+                  onClick={() => {
+                    setAuthMode("merchant_register");
+                    setAuthError("");
+                  }}
+                  className="mt-2 font-bold text-violet-300 hover:text-violet-200 inline-flex items-center gap-1.5"
+                >
+                  <Icon name="store" className="w-4 h-4" />
+                  سجّل محلك كتاجر
+                </button>
+              </div>
+            )}
+
+            {!isAdmin && !isMerchant && (
               <p className="text-center text-sm text-zinc-500 mt-6">
                 {authMode === "client_login" ? (
                   <>
@@ -1139,6 +987,15 @@ export default function HomePage() {
         </main>
         {toastLayer}
       </div>
+    );
+  }
+
+  if (user.role === "merchant" && merchant && merchant.status !== "approved") {
+    return (
+      <>
+        <MerchantStatusScreen merchant={merchant} onLogout={handleLogout} onRefresh={refreshMerchant} />
+        {toastLayer}
+      </>
     );
   }
 
@@ -1181,8 +1038,17 @@ export default function HomePage() {
 
   const pendingCustom = customRequests.filter((r) => r.status === "قيد النظر" || !r.admin_reply).length;
 
+  const pendingMerchants = adminMerchants.filter((m) => m.status === "pending").length;
+  const isMerchantUser = user.role === "merchant";
+
   const navItems: { key: Tab; label: string; icon: string; badge?: number; onClick?: () => void }[] =
-    user.role === "client"
+    isMerchantUser
+      ? [
+          { key: "inventory", label: "قطعي", icon: "box", onClick: fetchMyParts },
+          { key: "merchant_sales", label: "مبيعاتي", icon: "chart" },
+          { key: "merchant_profile", label: "ملف المحل", icon: "store" },
+        ]
+      : user.role === "client"
       ? [
           { key: "store", label: "المتجر", icon: "grid", onClick: () => setSelectedCategory(null) },
           { key: "cart", label: "السلة", icon: "cart", badge: totalCartCount },
@@ -1193,6 +1059,7 @@ export default function HomePage() {
           { key: "store", label: "المتجر", icon: "grid", onClick: () => setSelectedCategory(null) },
           { key: "orders", label: "إدارة الطلبات", icon: "clipboard", badge: orderCounts["معلق"], onClick: fetchOrdersAdmin },
           { key: "custom_admin", label: "الطلبات الخاصة", icon: "message", badge: pendingCustom, onClick: fetchCustomRequestsAdmin },
+          { key: "merchants", label: "التجار", icon: "store", badge: pendingMerchants, onClick: fetchMerchantsAdmin },
           { key: "inventory", label: "المخزن", icon: "box" },
           { key: "staff", label: "الموظفين", icon: "users" },
         ];
@@ -1243,11 +1110,26 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0A0C0F]/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="h-16 flex items-center justify-between gap-4">
-            <button onClick={() => { setSelectedCategory(null); setActiveTab("store"); }} className="shrink-0">
+            <button
+              onClick={() => {
+                setSelectedCategory(null);
+                setActiveTab(isMerchantUser ? "inventory" : "store");
+              }}
+              className="shrink-0"
+            >
               <Logo />
             </button>
 
             <div className="flex items-center gap-2 sm:gap-3">
+              {isMerchantUser && merchant ? (
+                <div className="hidden sm:flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.03] pl-3 pr-1.5 py-1.5">
+                  <StoreAvatar merchant={merchant} size="sm" />
+                  <div className="leading-tight">
+                    <p className="text-xs font-bold text-zinc-200 max-w-[140px] truncate">{merchant.store_name}</p>
+                    <p className="text-[10px] font-semibold text-violet-400">حساب تاجر · عمولة {merchant.commission_rate}٪</p>
+                  </div>
+                </div>
+              ) : (
               <div className="hidden sm:flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.03] pl-3 pr-1.5 py-1.5">
                 <div
                   className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black ${
@@ -1263,6 +1145,7 @@ export default function HomePage() {
                   </p>
                 </div>
               </div>
+              )}
               {user.role === "client" && (
                 <button
                   onClick={() => setActiveTab("cart")}
@@ -1507,6 +1390,13 @@ export default function HomePage() {
                       <p className="text-[11px] text-zinc-500 mt-1.5 truncate">
                         <span className="text-zinc-600">{part.category === "salvage" ? "الحالة: " : "VIN: "}</span>
                         <span className={part.category === "salvage" || !part.vin ? "" : "font-mono"}>{part.vin || "غير محدد"}</span>
+                      </p>
+                      <p className="flex items-center gap-1.5 text-[11px] mt-2 text-zinc-500">
+                        <Icon name="store" className="w-3.5 h-3.5" />
+                        يباع بواسطة:{" "}
+                        <span className={`font-bold truncate ${part.store_name ? "text-violet-300" : "text-orange-300"}`}>
+                          {part.store_name || "AutoParts Hub"}
+                        </span>
                       </p>
 
                       <div className="mt-auto pt-4 flex items-end justify-between gap-3">
@@ -2178,9 +2068,17 @@ export default function HomePage() {
         )}
 
         {/* =================== 7. Inventory =================== */}
-        {activeTab === "inventory" && user.role === "admin" && (
+        {activeTab === "inventory" && (user.role === "admin" || isMerchantUser) && (
           <div className="aph-in">
-            <SectionHeader icon="box" title="إدارة المخزن" subtitle={`${parts.length} قطعة مسجلة`} />
+            <SectionHeader
+              icon="box"
+              title={isMerchantUser ? "قطع محلي" : "إدارة المخزن"}
+              subtitle={
+                isMerchantUser
+                  ? `${parts.length} قطعة معروضة باسم محلك · عمولة المنصة ${merchant?.commission_rate ?? 0}٪ تنخصم من السعر`
+                  : `${parts.length} قطعة مسجلة`
+              }
+            />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               <div className={`${panelCls} p-6 lg:sticky lg:top-36`}>
                 <div className="flex items-center justify-between mb-5">
@@ -2257,7 +2155,7 @@ export default function HomePage() {
                       />
                     </div>
                     <div>
-                      <label className={labelCls}>السعر (ر.س)</label>
+                      <label className={labelCls}>{isMerchantUser ? "سعر البيع للعميل (ر.س)" : "السعر (ر.س)"}</label>
                       <input
                         type="number"
                         required
@@ -2267,6 +2165,29 @@ export default function HomePage() {
                       />
                     </div>
                   </div>
+                  {isMerchantUser && merchant && Number(partForm.price) > 0 && (
+                    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-xs space-y-1.5">
+                      {(() => {
+                        const c = previewCommission(Number(partForm.price), merchant.commission_rate);
+                        return (
+                          <>
+                            <div className="flex justify-between text-zinc-400">
+                              <span>العميل يدفع</span>
+                              <span className="font-bold text-zinc-200">{fmt(Number(partForm.price))} ر.س</span>
+                            </div>
+                            <div className="flex justify-between text-orange-300">
+                              <span>عمولة المنصة ({merchant.commission_rate}٪)</span>
+                              <span className="font-bold">−{fmt(c.commission)} ر.س</span>
+                            </div>
+                            <div className="flex justify-between text-emerald-300 border-t border-white/[0.06] pt-1.5">
+                              <span className="font-bold">صافي لك</span>
+                              <span className="font-black">{fmt(c.net)} ر.س</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                   <div>
                     <label className={labelCls}>{partForm.category === "salvage" ? "حالة القطعة" : "رقم الهيكل (VIN)"}</label>
                     <input
@@ -2278,10 +2199,30 @@ export default function HomePage() {
                     />
                   </div>
                   <div>
-                    <label className={labelCls}>رابط الصورة</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className={`${labelCls} mb-0`}>صورة القطعة</label>
+                      <label
+                        className={`text-[11px] font-bold text-orange-300 hover:text-orange-200 cursor-pointer inline-flex items-center gap-1 ${
+                          uploadingImage ? "opacity-50 pointer-events-none" : ""
+                        }`}
+                      >
+                        {uploadingImage ? <Icon name="spinner" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="upload" className="w-3.5 h-3.5" />}
+                        رفع من الجهاز
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = "";
+                            if (f) handleUploadPartImage(f);
+                          }}
+                        />
+                      </label>
+                    </div>
                     <input
-                      type="url"
-                      placeholder="https://..."
+                      type="text"
+                      placeholder="https://... أو ارفع صورة"
                       dir="ltr"
                       className={`${inputCls} text-left`}
                       value={partForm.image_url}
@@ -2298,7 +2239,7 @@ export default function HomePage() {
                   <div className="flex gap-2 pt-1">
                     <button type="submit" className={`${btnPrimary} flex-1`}>
                       <Icon name={isEditing ? "check" : "plus"} className="w-4 h-4" strokeWidth={2.4} />
-                      {isEditing ? "حفظ التعديلات" : "إضافة للمخزن"}
+                      {isEditing ? "حفظ التعديلات" : isMerchantUser ? "عرض القطعة للبيع" : "إضافة للمخزن"}
                     </button>
                     {isEditing && (
                       <button
@@ -2366,6 +2307,12 @@ export default function HomePage() {
                                   <p className="text-xs text-zinc-500">
                                     {p.make} {p.model} {p.year ? `· ${p.year}` : ""}
                                   </p>
+                                  {!isMerchantUser && p.store_name && (
+                                    <p className="text-[11px] font-semibold text-violet-300 mt-0.5 flex items-center gap-1">
+                                      <Icon name="store" className="w-3 h-3" />
+                                      {p.store_name}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -2417,6 +2364,17 @@ export default function HomePage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* =================== Merchant: sales & profile =================== */}
+        {activeTab === "merchant_sales" && isMerchantUser && merchant && <MerchantSales merchant={merchant} />}
+        {activeTab === "merchant_profile" && isMerchantUser && merchant && (
+          <MerchantProfile merchant={merchant} onUpdated={setMerchant} notify={notify} />
+        )}
+
+        {/* =================== Admin: merchants =================== */}
+        {activeTab === "merchants" && user.role === "admin" && (
+          <AdminMerchants merchants={adminMerchants} reload={fetchMerchantsAdmin} notify={notify} />
         )}
 
         {/* =================== 8. Staff =================== */}
