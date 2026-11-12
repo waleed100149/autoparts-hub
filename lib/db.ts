@@ -162,6 +162,21 @@ async function initDB() {
   `);
   await tryQuery("ALTER TABLE custom_requests ADD COLUMN category ENUM('parts', 'salvage') DEFAULT 'parts'");
 
+  // الملفات المرفوعة (شعارات، سجلات تجارية، صور قطع) تنحفظ داخل القاعدة نفسها
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS uploads (
+      id CHAR(36) PRIMARY KEY,
+      owner_id INT NULL,
+      folder VARCHAR(50) NOT NULL,
+      mime VARCHAR(100) NOT NULL,
+      size INT NOT NULL,
+      is_private TINYINT(1) NOT NULL DEFAULT 0,
+      data MEDIUMBLOB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_uploads_owner (owner_id)
+    ) ${TABLE_OPTS}
+  `);
+
   await seedAdmin();
 }
 

@@ -52,7 +52,7 @@ export function parsePart(body: any) {
   if (!Number.isFinite(price) || price <= 0) throw new HttpError(400, "السعر يجب أن يكون رقماً أكبر من صفر");
 
   const image_url = str(body.image_url);
-  if (image_url && !/^(https?:\/\/|\/uploads\/)/i.test(image_url)) throw new HttpError(400, "رابط الصورة يجب أن يبدأ بـ http أو https");
+  if (image_url && !/^(https?:\/\/|\/api\/files\/)/i.test(image_url)) throw new HttpError(400, "رابط الصورة يجب أن يبدأ بـ http أو https");
 
   return {
     part_name,

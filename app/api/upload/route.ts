@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     const file = asFile((await req.formData()).get("file"));
     if (!file) throw new HttpError(400, "اختر صورة");
 
-    const url = await saveUpload(file, "parts", "image");
+    const url = await saveUpload(file, "image", { folder: "parts", ownerId: user.id });
     return NextResponse.json({ url }, { status: 201 });
   } catch (error) {
     return handleError(error);

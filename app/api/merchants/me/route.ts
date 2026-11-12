@@ -30,7 +30,7 @@ export async function PUT(req: Request) {
     if (iban && !/^SA\d{22}$/.test(iban)) throw new HttpError(400, "رقم الآيبان غير صحيح");
 
     const logo = asFile(form.get("logo"));
-    const logo_url = logo ? await saveUpload(logo, "merchants/logos", "image") : undefined;
+    const logo_url = logo ? await saveUpload(logo, "image", { folder: "logos", ownerId: user.id }) : undefined;
 
     await pool.execute(
       `UPDATE merchants SET store_name = ?, phone = ?, city = ?, address = ?, iban = ?${logo_url ? ", logo_url = ?" : ""}

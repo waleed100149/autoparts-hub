@@ -39,9 +39,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const cr_document_url = await saveUpload(crFile, "merchants/documents", "document");
-    const logo_url = logoFile ? await saveUpload(logoFile, "merchants/logos", "image") : null;
-
     const hash = await bcrypt.hash(account.password, 10);
     await conn.beginTransaction();
     const [result]: any = await conn.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'merchant')", [
@@ -50,6 +47,11 @@ export async function POST(req: Request) {
       hash,
     ]);
     const userId = result.insertId as number;
+
+    // الملفات تنحفظ داخل نفس الـ transaction — لو فشل أي شي ما يبقى ملف يتيم
+    // السجل التجاري خاص: ما يفتحه إلا التاجر نفسه والإدارة
+    const cr_document_url = await saveUpload(crFile, "document", { folder: "documents", ownerId: userId, isPrivate: true, conn });
+    const logo_url = logoFile ? await saveUpload(logoFile, "image", { folder: "logos", ownerId: userId, conn }) : null;
     await conn.execute(
       `INSERT INTO merchants
         (user_id, store_name, logo_url, phone, city, address, tax_number, commercial_register, cr_document_url, iban,
